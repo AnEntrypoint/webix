@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" class="ds-247420" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>webix — x86_64 Linux userspace, in your browser</title>
+  <meta name="description" content="Blink-backed x86_64 Linux userspace emulator. ~280 lines of host code over a 240KB Blink wasm. Real busybox, real ELF, real syscalls — running live in this tab.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2316a34a'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='monospace' font-size='18' fill='white' font-weight='bold'%3Ex%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://unpkg.com/anentrypoint-design@latest/dist/247420.css">
+  <link rel="preload" href="./assets/blinkenlib.wasm" as="fetch" type="application/wasm" crossorigin>
+  <script type="importmap">
+    { "imports": { "anentrypoint-design": "https://unpkg.com/anentrypoint-design@latest/dist/247420.js" } }
+  </script>
+  <style>
+    body { margin: 0 }
+    #app { min-height: 100vh }
+    .demo-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+    @media (min-width: 880px) { .demo-grid { grid-template-columns: 1fr 1fr } }
+    .demo-out { background: var(--panel-bg, #0b0b0b); color: var(--panel-fg, #e6e6e6); font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12.5px; padding: 0.75rem 1rem; border-radius: 8px; min-height: 9rem; max-height: 22rem; overflow: auto; white-space: pre-wrap; line-height: 1.45 }
+    .demo-regs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.25rem 1rem; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px }
+    .demo-regs > span { display: flex; justify-content: space-between; gap: 0.5rem }
+    .demo-regs b { color: var(--green, #16a34a); font-weight: 600 }
+    .demo-buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0 1rem 0 }
+    .demo-buttons button { font: inherit; cursor: pointer; padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid var(--rule, #d4d4d4); background: var(--surface, #fff); color: inherit }
+    .demo-buttons button:hover:not(:disabled) { background: var(--panel-select, #f0f0f0) }
+    .demo-buttons button:disabled { opacity: 0.5; cursor: wait }
+    .demo-status { font-family: "JetBrains Mono", monospace; font-size: 11.5px; opacity: 0.7; margin-top: 0.4rem }
+    .demo-card { padding: 1.25rem; border-radius: 10px; background: var(--panel-surface, #fafafa); border: 1px solid var(--rule, #ececec) }
+    .demo-card h3 { margin: 0 0 0.5rem 0; font-size: 0.95rem; letter-spacing: 0.02em; text-transform: lowercase }
+    .demo-card p { margin: 0 0 0.75rem 0; opacity: 0.8; font-size: 0.92rem }
+    .pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 99px; font-size: 11px; font-family: "JetBrains Mono", monospace; background: var(--green, #16a34a); color: white; vertical-align: middle }
+    .pill.warn { background: #c2410c }
+    .pill.idle { background: #6b7280 }
+  </style>
+</head>
+<body>
+  <div id="app">loading…</div>
+
+  <script type="module">
+    import { mount, components as C, h } from 'anentrypoint-design';
+    import { installWindowDebug } from './assets/x86_64-witness-bootstrap.js';
+
+    const state = {
+      status: 'idle',
+      log: [],
+      lastExit: null,
+      regs: null,
+      stdout: '',
+      stderr: '',
+      memBytes: null
+    };
+
+    const log = (m) => { state.log.push(`[${new Date().toLocaleTimeString()}] ${m}`); render() };
+
+    async function boot(){
+      state.status = 'booting';
+      render();
+      try {
+        const base = new URL('./assets/', document.baseURI).href;
+        const x = await installWindowDebug({
+          wasmUrl: base + 'blinkenlib.wasm',
+          glueUrl: base + 'blinkenlib.js',
+          elfUrl: base + 'hello-x86_64.elf',
+          argv: ['hello'],
+          onLog: log
+        });
+        state.regs = x.registers;
+        state.lastExit = x.exitCode;
+        state.stdout = x.stdout;
+        state.stderr = x.stderr;
+        state.status = 'ready';
+      } catch (e) {
+        state.status = 'error';
+        log('FAIL: ' + (e?.message || e));
+      }
+      render();
+    }
+
+    async function runHello(){
+      const x = window.__debug?.x86_64; if (!x) return;
+      state.status = 'running'; render();
+      const bytes = new Uint8Array(await (await fetch('./assets/hello-x86_64.elf')).arrayBuffer());
+      const r = await x.runElf(bytes, { argv: ['hello'] });
+      state.lastExit = r.exitCode; state.stdout = r.stdout; state.stderr = r.stderr;
+      state.regs = Object.fromEntries(Object.entries(x.host.readRegisters()).map(([k,v]) => [k, typeof v === 'bigint' ? v.toString(16) : v.toString(16)]));
+      state.status = 'ready'; log(`hello → exit=${r.exitCode}`); render();
+    }
+
+    async function runBusybox(argv){
+      const x = window.__debug?.x86_64; if (!x) return;
+      state.status = 'running'; render();
+      const bytes = new Uint8Array(await (await fetch('./assets/busybox-x86_64.elf')).arrayBuffer());
+      const r = await x.runElf(bytes, { argv });
+      state.lastExit = r.exitCode; state.stdout = r.stdout; state.stderr = r.stderr;
+      state.regs = Object.fromEntries(Object.entries(x.host.readRegisters()).map(([k,v]) => [k, typeof v === 'bigint' ? v.toString(16) : v.toString(16)]));
+      state.status = 'ready'; log(`busybox ${argv.join(' ')} → exit=${r.exitCode}`); render();
+    }
+
+    function takeSnapshot(){
+      const x = window.__debug?.x86_64; if (!x) return;
+      const s = x.snapshot();
+      state.memBytes = s.memory.byteLength;
+      log(`snapshot: ${s.memory.byteLength.toLocaleString()} bytes of linear memory + register block`);
+      render();
+    }
+
+    window.__webixDemo = { boot, runHello, runBusybox, takeSnapshot, state };
+
+    function statusPill(){
+      const cls = state.status === 'ready' ? '' : state.status === 'error' ? 'warn' : 'idle';
+      return h('span', { class: 'pill ' + cls }, state.status);
+    }
+
+    function regGrid(){
+      if (!state.regs) return h('div', { class: 'demo-status' }, '(boot to populate registers)');
+      const order = ['rip','rax','rdi','rsi','rdx','rsp','rbp','rcx','r8','r9','r10','r11','r12','r13','r14','r15'];
+      return h('div', { class: 'demo-regs' },
+        ...order.map(k => h('span', null,
+          h('b', null, k),
+          h('span', null, '0x' + (state.regs[k] || '0'))
+        ))
+      );
+    }
+
+    function demoCard(){
+      const ready = state.status === 'ready' || state.status === 'running';
+      const busy = state.status === 'booting' || state.status === 'running';
+      return h('div', { class: 'demo-card', id: 'demo-runner' },
+        h('h3', null, 'live demo · ', statusPill()),
+        h('p', null, 'Boot the Blink wasm (~240 KB) and run a real x86_64 ELF. Output and registers update from the same window.__debug.x86_64 contract used by the test suite.'),
+        h('div', { class: 'demo-buttons' },
+          h('button', { onclick: boot, disabled: busy }, state.status === 'idle' ? 'boot host' : 'reboot host'),
+          h('button', { onclick: runHello, disabled: !ready || busy }, 'run hello-x86_64.elf'),
+          h('button', { onclick: () => runBusybox(['echo','hello','from','busybox']), disabled: !ready || busy }, 'busybox echo'),
+          h('button', { onclick: () => runBusybox(['uname','-a']), disabled: !ready || busy }, 'busybox uname -a'),
+          h('button', { onclick: () => runBusybox(['expr','7','*','6']), disabled: !ready || busy }, 'busybox expr 7 * 6'),
+          h('button', { onclick: takeSnapshot, disabled: !ready || busy }, 'snapshot memory'),
+        ),
+        h('div', { class: 'demo-grid' },
+          h('div', null,
+            h('div', { class: 'demo-status' }, `exit: ${state.lastExit ?? '—'}    mem snapshot: ${state.memBytes ? state.memBytes.toLocaleString() + ' bytes' : '—'}`),
+            h('div', { class: 'demo-out', id: 'demo-stdout' }, state.stdout || '(no stdout yet — boot the host to see hi)'),
+            state.stderr ? h('div', { class: 'demo-out', style: 'margin-top:0.5rem;color:#fda4af' }, 'stderr:\n' + state.stderr) : null,
+          ),
+          h('div', null,
+            h('div', { class: 'demo-status' }, 'registers (hex)'),
+            regGrid(),
+            h('div', { class: 'demo-status', style: 'margin-top:0.75rem' }, 'log'),
+            h('div', { class: 'demo-out' }, state.log.slice(-12).join('\n') || '(idle)')
+          )
+        )
+      );
+    }
+
+    function render(){
+      mount(document.getElementById('app'), () => C.AppShell({
+        topbar: C.Topbar({
+          brand: 'webix',
+          leaf: 'x86_64',
+          items: [
+            ['demo','#demo-runner'],
+            ['github','https://github.com/AnEntrypoint/webix'],
+            ['npm','https://www.npmjs.com/package/webix'],
+          ]
+        }),
+        crumb: C.Crumb({ leaf: 'x86_64 linux userspace, in your browser' }),
+        main: h('main', { style: 'max-width: 980px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem' },
+          C.Hero({
+            heading: 'webix',
+            subheading: 'blink-backed x86_64 linux userspace, in your browser',
+            body: '~280 lines of host code over a 240KB Blink wasm that owns the CPU, MMU, ~150 Linux x86_64 syscalls, signals, fork/clone, and AF_INET/UNIX/INET6. Replaces what most projects in this category hand-roll — no JS instruction decoder, no JS syscall ABI, no JS VFS.',
+            badges: [{ label: '11/11 tests' }, { label: 'node + bun' }, { label: 'browser witnessed' }]
+          }),
+          demoCard(),
+          C.Section({
+            heading: 'how it works',
+            body: 'A single Blink Module instance loads at boot. mountTarBytes layers an Alpine rootfs into MEMFS; mountNodeDir (Node only) exposes any host directory at /host via NODEFS. runElf feeds an ELF in and pumps signals + register state out via a cross-language struct. snapshot/restore round-trips byte-exact wasm memory + registers.'
+          }),
+          C.Section({
+            heading: 'what runs',
+            body: 'real musl-static busybox, real Alpine /bin/busybox + /sbin/apk via dynamic ld-musl, multi-line shell scripts with arithmetic, SSE2 (verified). AVX traps SIGILL · socket(AF_INET) returns ENOSYS · pthread_create unsupported — all upstream Blink build flags (POSIX NOJIT NOSOCK), unblocked by an emscripten rebuild.'
+          }),
+          C.Install({ npm: 'npm install webix' }),
+        ),
+        status: C.Status({
+          left: ['main', state.status],
+          right: ['blink', '11/11', state.lastExit !== null ? `exit ${state.lastExit}` : 'idle']
+        })
+      }));
+    }
+
+    render();
+    boot();
+  </script>
+</body>
+</html>

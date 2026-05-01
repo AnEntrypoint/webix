@@ -1,0 +1,54 @@
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "containers/blinkenlib.wasm"
+      - "containers/blinkenlib.js"
+      - "containers/hello-x86_64.elf"
+      - "containers/busybox-x86_64.elf"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync runtime assets into docs/assets
+        run: |
+          mkdir -p docs/assets
+          cp containers/blinkenlib.wasm     docs/assets/
+          cp containers/blinkenlib.js       docs/assets/
+          cp containers/hello-x86_64.elf    docs/assets/
+          cp containers/busybox-x86_64.elf  docs/assets/
+          cp src/blink-core.js              docs/assets/
+          cp src/x86_64-blink-browser.js    docs/assets/
+          cp src/x86_64-witness-bootstrap.js docs/assets/
+          ls -lh docs/assets/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

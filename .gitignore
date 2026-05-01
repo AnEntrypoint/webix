@@ -24,3 +24,4 @@ node_modules
 .gm
 .xos-test.log
 dist
+docs/assets/

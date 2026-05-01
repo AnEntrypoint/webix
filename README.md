@@ -58,6 +58,19 @@ XState 5 (real npm package) drives the kernel/process/scheduler state machines. 
 ELF64 dispatch · hand-built hello (exit 42) · kernel API + ProcessActor · musl-static busybox (echo/uname/expr) · alpine dynamic /bin/busybox + /sbin/apk via ld-musl · multi-line sh script from MEMFS · runShellScript · byte-exact snapshot/restore of wasm memory + registers · SSE2 round-trip · AVX SIGILL boundary · NODEFS host passthrough · NOSOCK ENOSYS witness.
 
 
+## Live demo
+
+GitHub Pages: <https://anentrypoint.github.io/webix/> — boots the Blink wasm
+in your tab, runs `hello-x86_64.elf` (exit 42, stdout `hi`), and lets you
+fire busybox commands and snapshot 16MB of linear memory + register state
+live. Styled via [`anentrypoint-design`](https://github.com/AnEntrypoint/Design)
+@latest from unpkg, no build step.
+
+The page source is `docs/index.html`. The deploy workflow at
+`.github/workflows/pages.yml` syncs `containers/blinkenlib.{wasm,js}`,
+`containers/{hello,busybox}-x86_64.elf`, and the three browser-host JS
+files from `src/` into `docs/assets/` before publishing.
+
 ## Run the witness page locally
 
 The browser host runs in any static server. The wasm must be served with
@@ -76,6 +89,17 @@ node -e 'const http=require("http"),fs=require("fs"),path=require("path"); \
 Open the URL and inspect `window.__debug.x86_64` in DevTools — it
 exposes `exitCode`, `stdout`, `stderr`, hex `registers`,
 `runElf(bytes, opts)`, `pushStdin(bytes)`, `snapshot()`.
+
+To preview the styled `docs/index.html` locally, sync the assets first:
+
+```bash
+mkdir -p docs/assets
+cp containers/{blinkenlib.wasm,blinkenlib.js,hello-x86_64.elf,busybox-x86_64.elf} docs/assets/
+cp src/{blink-core.js,x86_64-blink-browser.js,x86_64-witness-bootstrap.js} docs/assets/
+# then point the snippet above at /docs/index.html instead of /public/x86_64-witness.html
+```
+
+`docs/assets/` is gitignored — CI repopulates it on every push.
 
 ## Build-flag residuals
 

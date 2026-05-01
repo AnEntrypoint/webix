@@ -1,5 +1,28 @@
 # Changelog
 
+## [unreleased] — GitHub Pages live demo
+
+- docs/index.html: styled landing + live x86_64 demo. AppShell/Topbar/
+  Hero/Section/Status from anentrypoint-design @latest via unpkg (no
+  build step). webjsx `h()` for the demo card. Boots the Blink wasm,
+  runs hello-x86_64.elf (exit 42, stdout `hi`, rax=0x3c, rdi=0x2a),
+  exposes buttons for busybox echo/uname -a/expr 7*6 and a 17_039_360
+  byte memory snapshot. State driven by window.__webixDemo.state and
+  window.__debug.x86_64 — same contract used by the test suite.
+- src/x86_64-witness-bootstrap.js: defineProperty fallback when
+  window.__debug already exists as a non-writable getter (the design
+  SDK's own debug module owns that key). Without this, the witness
+  page errored "Cannot assign to read only property '__debug'" the
+  moment the SDK loaded alongside it.
+- .github/workflows/pages.yml: build job syncs blinkenlib.{wasm,js},
+  hello + busybox ELFs, and the three browser-host JS files from
+  src/ into docs/assets/, then deploys ./docs via official Pages
+  actions. Triggered on changes under docs/, src/, or any of those
+  source binaries.
+- .gitignore: docs/assets/ is gitignored — CI repopulates from the
+  sources of truth so we don't ship the wasm twice.
+- README.md: "Live demo" section + local preview recipe.
+
 ## [0.6.2] — Third-pass policy alignment
 
 - blink-core.js: replaced setTimeout(5) busy-wait with deferred Promise

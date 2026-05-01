@@ -10,7 +10,7 @@ export async function installWindowDebug({ wasmUrl="/containers/blinkenlib.wasm"
   onLog("exit="+r.exitCode+" stdout="+JSON.stringify(r.stdout));
   const regs=host.readRegisters();
   const hex=Object.fromEntries(Object.entries(regs).map(([k,v])=>[k, typeof v==="bigint"?v.toString(16):v.toString(16)]));
-  window.__debug=window.__debug??{};
+  if(!window.__debug) Object.defineProperty(window,"__debug",{ value:{}, writable:true, configurable:true });
   window.__debug.x86_64={
     host, ready:true,
     exitCode:r.exitCode, stdout:r.stdout, stderr:r.stderr, signal:r.signal,
