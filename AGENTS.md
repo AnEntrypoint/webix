@@ -74,6 +74,27 @@ populating. Added non-obvious caveat to AGENTS.md: blink-core overlap
 guard prevents runElf re-entrance. 0 items migrated this cycle. Store
 expected to be ready for recall migrations in Cycle 3.
 
+**Cycle 3 (2026-05-01, webix v0.6.2 full validation)**: 6 new facts
+ingested (v0.6.2 node+bun parity, CLI verb shapes, witness register
+expectations, snapshot key shape, mprotect noise advisory, port-8765
+squatter advisory). Re-sampled the same 5 stable items from Cycle 2 —
+all 5 still return no recall results. Store population is slower than
+hoped; no migrations possible yet. Added two non-obvious caveats below
+(emscripten mprotect warnings are benign; port 8765 is squatted on dev
+box). 0 items migrated this cycle.
+
+
+## Witness host gotchas (v0.6.2)
+
+- **emscripten mprotect noise.** Running musl-static busybox prints
+  `warning: unsupported syscall: __syscall_mprotect` repeatedly. Benign
+  with the POSIX NOJIT NOSOCK build — do not chase as a regression.
+- **Port 8765 is frequently squatted** on the dev box by a background
+  `python -m http.server`. Use 9123 (or any other free port) for the
+  static-server step in the browser witness flow.
+- **Bun parity.** `bun test.js` passes 11/11 alongside Node 23.10.0 —
+  file:// dynamic import + emscripten glue + wasm load all work in Bun
+  1.3.8 without modification. Both runtimes are first-class for tests.
 
 ## Browser witness pattern
 
