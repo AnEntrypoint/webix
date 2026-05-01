@@ -1,46 +1,27 @@
-import { CPU } from "./cpu.js";
-import { loadELF32Process, loadFlatBinary, parseELF32, parseELF64, setupInitialStack } from "./elf.js";
-
-export class ArchitectureError extends Error {}
+import { parseELF32, parseELF64 } from "./elf.js";
 
 export class Architecture {
-  constructor(id, options = {}) { this.id = id; this.bits = options.bits; this.endian = options.endian ?? "little"; this.machine = options.machine; }
-  createCPU() { throw new Error(`${this.id}: createCPU not implemented`); }
-  parseExecutable() { throw new Error(`${this.id}: parseExecutable not implemented`); }
-  loadProcess() { throw new ArchitectureError(`${this.id}: loadProcess not implemented`); }
-  setupInitialStack() { throw new ArchitectureError(`${this.id}: setupInitialStack not implemented`); }
-  matchesELF(_elf) { return false; }
+  constructor(id,opts={}){this.id=id;this.bits=opts.bits;this.machine=opts.machine}
+  matchesELF(_){return false}
 }
-
 export class I386Architecture extends Architecture {
-  constructor() { super("i386", { bits: 32, endian: "little", machine: "EM_386" }); }
-  createCPU(memory, syscalls, options = {}) { return new CPU(memory, syscalls, options); }
-  parseExecutable(bytes) { return parseELF32(bytes); }
-  matchesELF(elf) { return elf?.header?.machine === 3 && elf?.bytes?.[4] === 1; }
-  loadProcess(bytes, options = {}) { return loadELF32Process(bytes, options); }
-  loadFlat(bytes, address, options = {}) { return loadFlatBinary(bytes, address, options); }
-  setupInitialStack(cpu, options = {}) { return setupInitialStack(cpu, options); }
-  syscallAbi() { return { trap: "int 0x80", number: "eax", args: ["ebx", "ecx", "edx", "esi", "edi", "ebp"], result: "eax", errno: "negative" }; }
+  constructor(){super("i386",{bits:32,machine:"EM_386"})}
+  parseExecutable(b){return parseELF32(b)}
+  matchesELF(elf){return elf?.header?.machine===3 && elf?.bytes?.[4]===1}
+  syscallAbi(){return {trap:"int 0x80",number:"eax",args:["ebx","ecx","edx","esi","edi","ebp"],result:"eax"}}
 }
-
-export class ArchitectureRegistry {
-  constructor() { this.arches = new Map(); }
-  register(arch) { this.arches.set(arch.id, arch); return arch; }
-  get(id) { const arch = this.arches.get(id); if (!arch) throw new Error(`unknown architecture ${id}`); return arch; }
-  list() { return [...this.arches.keys()]; }
-}
-
 export class X86_64Architecture extends Architecture {
-  constructor() { super("x86_64", { bits: 64, endian: "little", machine: "EM_X86_64" }); }
-  parseExecutable(bytes) { return parseELF64(bytes); }
-  matchesELF(elf) { return elf?.header?.machine === 62 && elf?.bytes?.[4] === 2; }
-  createCPU() { return { kind: "blink", note: "Blink wasm owns CPU; see src/x86_64-blink.js" }; }
-  loadProcess(bytes, options = {}) { return { arch: "x86_64", bytes, argv: options.argv ?? [], env: options.env ?? [] }; }
-  syscallAbi() { return { trap: "syscall", number: "rax", args: ["rdi", "rsi", "rdx", "r10", "r8", "r9"], result: "rax", errno: "negative" }; }
+  constructor(){super("x86_64",{bits:64,machine:"EM_X86_64"})}
+  parseExecutable(b){return parseELF64(b)}
+  matchesELF(elf){return elf?.header?.machine===62 && elf?.bytes?.[4]===2}
+  syscallAbi(){return {trap:"syscall",number:"rax",args:["rdi","rsi","rdx","r10","r8","r9"],result:"rax"}}
 }
-
-export const architectures = new ArchitectureRegistry();
-export const i386 = architectures.register(new I386Architecture());
-export const x86_64 = architectures.register(new X86_64Architecture());
-
-export const defaultArchitectureRegistry = architectures;
+export class ArchitectureRegistry {
+  constructor(){this.arches=new Map()}
+  register(a){this.arches.set(a.id,a);return a}
+  get(id){const a=this.arches.get(id);if(!a)throw new Error(`unknown arch ${id}`);return a}
+  list(){return [...this.arches.keys()]}
+}
+export const architectures=new ArchitectureRegistry();
+export const i386=architectures.register(new I386Architecture());
+export const x86_64=architectures.register(new X86_64Architecture());

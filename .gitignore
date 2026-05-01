@@ -17,3 +17,9 @@
 .plugkit-browser-profile-*/
 .plugkit-agent-worktree/
 *.stackdump
+node_modules
+.plugkit-browser-profile
+.codeinsight
+.gm
+.xos-test.log
+dist

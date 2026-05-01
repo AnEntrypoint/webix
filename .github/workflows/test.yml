@@ -14,5 +14,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Run test.js (10/10 x86_64 cases)
+          cache: npm
+      - run: npm ci
+      - name: Run test.js (11/11 x86_64 cases)
         run: node test.js

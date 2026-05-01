@@ -10,5 +10,9 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.js", "tools/**/*.mjs", "tests/**/*.mjs", "bin/**/*.mjs"]
+  "include": [
+    "src/**/*.js",
+    "bin/**/*.mjs",
+    "test.js"
+  ]
 }

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.0] — Blink-only re-architecture
+
+- Removed: src/cpu.js (804L IA-32 interpreter), src/syscalls.js (767L Linux i386
+  ABI), src/jit.js, src/memory.js, src/vfs.js, src/devices.js, src/ext2.js,
+  src/runtime.js, src/process-manager.js, src/network.js, src/network-node.js,
+  src/overlay-vfs.js, src/package-manager.js, src/persistence*.js, src/pty.js,
+  src/rootfs.js, src/snapshot.js, src/tar.js, src/signals.js, src/sync.js,
+  src/io.js, src/util.js, src/diagnostics.js, src/cli-runtime.js, src/node.js,
+  src/browser_bridge.js, src/xstate-orchestration.js, src/xstate-lite.js.
+  All tests/, dist/, samples/, docs/, tools/, assets/. cli.js, sw.js,
+  alpine.html, index.html, IMPLEMENTATION_NOTES.md.
+- Replaced xstate-lite hand-roll with real `xstate` v5 npm package
+  (machines.js wraps actors so getSnapshot returns plain {value,context,status}).
+- Slim survivors all <200L per repo policy: elf.js 30L, arch.js 28L,
+  machines.js 56L, kernel.js 36L, index.js 6L, bin/xos.mjs 47L.
+- Single test.js at root, 11/11 pass against real Blink wasm.
+- bin/xos.mjs reduced to run-x86_64 + run-shell. No more i386 boot/shell/run/
+  trace/package commands.
+- package.json: name → webix, version 0.6.0, scripts trimmed to test + xos,
+  exports list ./, ./browser, ./blink, ./blink-browser, ./kernel.
+
+# Changelog
+
 ## [unreleased]
 
 - feat(x86_64): NODEFS host-filesystem passthrough — `host.mountNodeDir`
