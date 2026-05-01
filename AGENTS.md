@@ -14,6 +14,20 @@ Project invariants for agents (and humans) working on webix.
   before merging.
 - **xstate v5 only** for actor lifecycle. The xstate-lite hand-roll was
   removed in 0.6.0; do not reintroduce.
+- **kernel.js never auto-deletes processes.** Processes remain in
+  processActors Map after EXIT with value=="exited", implementing POSIX
+  wait() semantics. Use kernel.reap(pid) for explicit cleanup. Retention
+  is intentional for post-mortem inspection; do not "fix the leak".
+- **browser.js is a separate entry point.** package.json conditional
+  exports route "." → src/index.js (Node) and "browser" → src/browser.js.
+  This split is critical: importing webix in a bundler that previously
+  pulled node:fs through src/x86_64-blink.js was a real bug. Do not merge
+  browser.js back into the main export.
+- **window.__debug.x86_64 shape.** src/x86_64-witness-bootstrap.js exports
+  installWindowDebug({wasmUrl, glueUrl, elfUrl, argv, onLog}). Witness
+  HTML calls this once; the resulting window.__debug.x86_64 exposes
+  {ready, exitCode, stdout, stderr, signal, registers, runElf, pushStdin,
+  snapshot}. This is the contract for witness pages using the x86_64 module.
 
 ## Do not restore
 
@@ -39,3 +53,13 @@ so the same artifact runs in Node and the browser.
 Commits go in as `lanmower <almagestfraternite@gmail.com>` from local
 dev, `github-actions` from CI. The git/GitHub identity discipline is
 documented in user CLAUDE.md.
+
+## Learning audit
+
+**Cycle 1 (2026-05-01)**: Baseline audit. Sampled 5 AGENTS.md items
+(Blink owns surface, test.js single, <200L per file, xstate v5, do not
+restore list). rs-learn was fresh (0 prior ingests). 0 items migrated
+(baseline — store must internalize before recall succeeds). 10 new facts
+ingested to rs-learn (webix v0.6.1 architecture, kernel, browser split,
+npm pack, CI, licenses, deleted files). Next cycle will test recall on
+all 10 + re-sample these 5 to measure learning curve.
