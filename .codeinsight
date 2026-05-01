@@ -1,0 +1,101 @@
+## 🎯 xstate-linux-os-emulator-cleanroom v0.5.1 — Clean-room XState-orchestrated browser/Node i386 Linux userspace emulator with ELF loading, VFS overlay, networking bridge, CLI, tests and benchmarks
+
+## 🚀 Quick Start
+
+`node tools/build.mjs` | `node tools/run-tests.mjs > .xos-test.log 2>&1; status=$?; cat .xos-test.log; exit $status`
+
+# 64f 5.7kL 629fn 57cls cx1.6
+*Legend: f=files L=lines fn=functions cls=classes cx=avg-complexity | file:line:name(NL)=location Np=params | ↑N=imports-from ↓N=imported-by (N)=occurrences (+N)=more | 🔄circular 🏝️isolated 🔥complex 📋duplicated 📁large*
+
+**Langs:** JS:99% JSON:0%
+
+## 🛠️ Tech Stack
+
+**Patterns:** this.setFlag(67), this.memory.write32(50), this.getFlag(47), this.decodeModRM(45), m.write32(44), nowSeconds(43)
+**Top IDs:** path(387), options(364), addr(361), vfs(313), length(291), data(247)
+
+## ⚡ Code Patterns
+
+**Async:** async(180), await(141), Promise(8)
+**Errors:** try/catch(51), throw(186)
+**Internal calls:** this.setFlag(67), this.memory.write32(50), this.getFlag(47), this.decodeModRM(45), m.write32(44), nowSeconds(43), this.getReg(41), this.setReg(41)
+
+## 🔗 I/O & Integration
+
+**Env vars:** GATEWAY, OPENX86_ALLOW_HOSTS, OPENX86_ALLOW_PRIVATE, OPENX86_GATEWAY_HOST, OPENX86_GATEWAY_PORT, OPENX86_MAX_STEPS
+**HTTP:** fetch(1)
+**Storage:** files(190), JSON(17)
+**Events:** emit(2), listen(26)
+
+## 📊 Code Organization
+
+**Large files:** src/cpu.js:803L, src/syscalls.js:766L, src/elf.js:312L, src/devices.js:252L, src/vfs.js:238L, src/memory.js:207L
+**Long funcs:** src/syscalls.js:551:dispatch(215L), src/cpu.js:451:handle0F(172L), src/cpu.js:624:step(170L), src/syscalls.js:334:_socketCall(61L), src/cpu.js:334:handleStringOp(59L), src/cpu.js:394:handleFPU(56L)
+**Many params:** src/network-node.js:21:openTcp(8p)
+**Classes:** src/process-manager.js:0:ProcessRecord, src/process-manager.js:0:ProcessManager, src/network.js:0:VirtualDNS, src/network.js:0:BrowserFetchNetwork, src/network.js:0:WebSocketTcpNetwork, src/network.js:0:SocketHandle, src/jit.js:0:BlockCacheJIT, src/elf.js:0:ELFError (+49)
+
+## 🔄 Architecture
+
+**L0 [pure exports]:** util(27↓), sync(6↓), signals(4↓), index(2↓), xstate-lite(2↓)
+**L1 [low imports]:** vfs(1↑13↓), network(2↑8↓), memory(1↑9↓), tar(1↑7↓), elf(2↑5↓), cpu(1↑6↓), rootfs(2↑5↓)
+**L2 [mid flow]:** runtime(12↑3↓), syscalls(5↑5↓), arch(4↑4↓)
+**L3 [pure imports]:** kernel(16↑), bench(14↑), process-manager(14↑), cli-runtime(5↑), persistence-node(3↑), package-install(3↑), package-manager(2↑), persistence(2↑) (+4)
+**Cross-module:** cli.js→src
+**Hubs:** util(0↑27↓), kernel(16↑0↓), runtime(12↑3↓), vfs(1↑13↓), bench(14↑0↓)
+**External:** node:dns, node:net, node:readline, node:perf_hooks, node:process
+
+## 🔌 API Surface
+
+**Exported fns:** tar.js:9:bytesToString(1p)
+**Classes:** ProcessRecord, ProcessManager, VirtualDNS, BrowserFetchNetwork, WebSocketTcpNetwork, SocketHandle (+51)
+**Entry files:** index, signals, sync, util, xstate-lite
+
+## 🚨 Issues
+
+- 🔥 Complex funcs: syscalls.js:551:dispatch(215L), cpu.js:451:handle0F(172L), cpu.js:624:step(170L)
+- 📁 Large files: src/cpu.js:803L, src/syscalls.js:766L
+- 📋 39 duplicated groups
+- 🔐 eval() in syscalls.js:458, syscalls.js:607
+
+## 🧹 Dead Code & Tests
+
+**Orphaned:** fetch-alpine-rootfs.mjs, browser_bridge.js, parity.mjs, run-alpine-smoke.mjs, openx86-sw.js, basic.mjs (+21)
+**Unused exports:** node.js: NodeTcpNetwork, saveVfsSnapshotToFile
+**Tests:** 0/64 (0%)
+
+## 📦 Modules
+
+- src: 36f, 227cx, 113↑114↓
+- tools: 13f, 0cx, 0↑0↓
+- tests: 9f, 0cx, 0↑0↓
+- bin: 1f, 0cx, 0↑0↓
+- public: 1f, 0cx, 0↑0↓
+
+## 📄 File Index
+
+**bin/xos.mjs** 95L fn: usage, takeFlag, hasFlag, makeRuntime (+1)
+**cli.js** 114L fn: loadRootfs, startShell, installTtyDevices
+**package.json** 43L
+**public/openx86-sw.js** 28L
+**src/arch.js** 36L fn: constructor, createCPU, parseExecutable, loadProcess (+14)
+**src/bench.js** 26L fn: benchmark, performanceNow
+**src/browser_bridge.js** 27L fn: registerOpenX86ServiceWorker, registerVirtualHttpPort
+**src/cli-runtime.js** 44L fn: parseArgv, loadRootfs, saveSnapshot, runProgram (+1)
+**src/cpu.js** 803L fn: constructor, maskFor, signBit, truncate (+44)
+**src/devices.js** 252L fn: asBytes, norm, join, cloneBytes (+32)
+**src/diagnostics.js** 40L fn: formatRegisters, captureRuntimeFault, faultReport, runWithDiagnostics
+**src/elf.js** 312L fn: asU8, viewOf, readString, flagsToPerm (+13)
+**src/ext2.js** 175L fn: u16, u32, asBytes, norm (+16)
+**src/index.js** 29L exports: [BrowserFetchNetwork], [applyELF32Relocations], [ProcessManager], [schedulerMachine], [BlockCacheJIT]
+**src/io.js** 55L fn: asBytes, constructor, push, close (+3)
+**src/jit.js** 100L fn: constructor, invalidate, _read32, _s8 (+3)
+**src/kernel.js** 47L fn: constructor, vfs, loadExecutable, run (+3)
+**src/machines.js** 64L fn: createKernelActor, createProcessActor, createSchedulerActor
+**src/memory.js** 207L fn: constructor, permFrom, permText, constructor (+37)
+**src/network-node.js** 39L fn: takeBytes, constructor, resolve, reverse (+7)
+*+44 more files*
+
+Git: branch: main, 1 uncommitted
+Hot: README.md(2)
+Tooling: TS standard
+Conv[JS]: 4-space, double quotes, semicolons, function declarations, named exports, relative imports, kebab-case files

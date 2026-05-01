@@ -1,0 +1,164 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>OpenX86 Alpine Linux demo</title>
+<style>
+  :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  body { margin: 0; background: #111; color: #eee; }
+  header { padding: 14px 18px; border-bottom: 1px solid #333; background: #181818; }
+  h1 { margin: 0 0 6px; font: 600 18px system-ui, sans-serif; }
+  main { display: grid; grid-template-columns: 360px 1fr; min-height: calc(100vh - 72px); }
+  aside { padding: 14px; border-right: 1px solid #333; background: #151515; }
+  label { display: block; margin: 10px 0 4px; font: 12px system-ui, sans-serif; color: #bbb; }
+  input, button, textarea { width: 100%; box-sizing: border-box; background: #222; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 8px; }
+  button { cursor: pointer; margin-top: 8px; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #term { white-space: pre-wrap; overflow: auto; height: calc(100vh - 132px); padding: 16px; line-height: 1.35; }
+  #cmd { position: fixed; left: 374px; right: 12px; bottom: 10px; width: auto; }
+  .hint { font: 12px system-ui, sans-serif; color: #aaa; line-height: 1.35; }
+  .ok { color: #8f8; } .warn { color: #ffd479; } .err { color: #ff8a8a; }
+</style>
+<header>
+  <h1>OpenX86 Alpine Linux in-browser target</h1>
+  <div class="hint">Loads Alpine x86 minirootfs into the clean-room IA-32/Linux runtime, then starts BusyBox ash. Browser TCP uses the optional WebSocket gateway.</div>
+</header>
+<main>
+  <aside>
+    <label>Alpine x86 minirootfs URL</label>
+    <input id="rootfsUrl" value="https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86/alpine-minirootfs-3.23.4-x86.tar.gz" />
+    <button id="loadUrl">Load rootfs from URL</button>
+    <label>Or upload local alpine-minirootfs-*.tar.gz</label>
+    <input id="rootfsFile" type="file" accept=".gz,.tgz,.tar.gz,application/gzip" />
+    <button id="loadFile">Load uploaded rootfs</button>
+    <label>WebSocket TCP gateway</label>
+    <input id="gateway" value="ws://127.0.0.1:8787/tcp" />
+    <div class="hint">Start it with <code>npm run gateway</code>. Guest DNS is virtualized in the runtime; guest TCP uses the gateway’s <code>/tcp</code> endpoint.</div>
+    <button id="startShell" disabled>Start /bin/sh -i</button>
+    <button id="runRelease" disabled>Run: cat /etc/alpine-release</button>
+    <button id="saveSnapshot" disabled>Save persistent VFS snapshot</button>
+    <button id="restoreSnapshot">Restore persistent VFS snapshot</button>
+    <button id="clear">Clear terminal</button>
+    <p class="hint warn">A true CheerpX-equivalent Alpine session also requires complete IA-32, process, clone/vfork, signal, and dynamic-linker parity. This demo wires the Alpine rootfs and network path; unsupported opcodes/syscalls are printed when encountered.</p>
+  </aside>
+  <section>
+    <div id="term"></div>
+    <input id="cmd" placeholder="type a shell line, press Enter" disabled />
+  </section>
+</main>
+<script type="module">
+import { createRuntime, ByteQueue, WebSocketTcpNetwork, mountAlpineMiniRootfs, saveVfsSnapshot, loadVfsSnapshot } from "./src/index.js";
+
+const term = document.getElementById("term");
+const rootfsUrl = document.getElementById("rootfsUrl");
+const gateway = document.getElementById("gateway");
+const cmd = document.getElementById("cmd");
+const loadUrl = document.getElementById("loadUrl");
+const loadFile = document.getElementById("loadFile");
+const startShell = document.getElementById("startShell");
+const runRelease = document.getElementById("runRelease");
+const clear = document.getElementById("clear");
+const saveSnapshot = document.getElementById("saveSnapshot");
+const restoreSnapshot = document.getElementById("restoreSnapshot");
+let rt, stdin, running = false;
+
+function print(text, cls = "") {
+  if (cls) term.innerHTML += `<span class="${cls}">${text.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))}</span>`;
+  else term.textContent += text;
+  term.scrollTop = term.scrollHeight;
+}
+function println(text = "", cls = "") { print(text + "\n", cls); }
+function newRuntime() {
+  stdin = new ByteQueue();
+  rt = createRuntime({
+    stdin,
+    network: new WebSocketTcpNetwork({ gatewayUrl: gateway.value }),
+    env: {
+      PATH: "/sbin:/bin:/usr/sbin:/usr/bin",
+      HOME: "/root",
+      USER: "root",
+      SHELL: "/bin/sh",
+      TERM: "xterm",
+      http_proxy: "",
+      https_proxy: "",
+    },
+    onWrite: (_fd, text) => print(text),
+    maxSteps: 100_000_000,
+  });
+}
+async function loadRootfs(opts) {
+  newRuntime();
+  startShell.disabled = runRelease.disabled = true;
+  cmd.disabled = true;
+  running = false;
+  await mountAlpineMiniRootfs(rt.vfs, { ...opts, progress: msg => println(`[rootfs] ${msg}`) });
+  println("[rootfs] Alpine rootfs mounted", "ok");
+  try { println("/etc/alpine-release: " + new TextDecoder().decode(rt.vfs.readFile("/etc/alpine-release")).trim(), "ok"); } catch {}
+  startShell.disabled = runRelease.disabled = saveSnapshot.disabled = false;
+}
+
+loadUrl.onclick = async () => {
+  try { await loadRootfs({ url: rootfsUrl.value }); }
+  catch (e) { println(`[error] ${e.message}\nTip: if the CDN blocks CORS, download the tar.gz and use the upload control.`, "err"); }
+};
+loadFile.onclick = async () => {
+  const file = document.getElementById("rootfsFile").files[0];
+  if (!file) { println("[error] choose a .tar.gz first", "err"); return; }
+  try { await loadRootfs({ bytes: new Uint8Array(await file.arrayBuffer()) }); }
+  catch (e) { println(`[error] ${e.message}`, "err"); }
+};
+startShell.onclick = async () => {
+  if (!rt) return;
+  try {
+    rt.syscalls.network = new WebSocketTcpNetwork({ gatewayUrl: gateway.value });
+    println("[exec] /bin/sh -i", "ok");
+    rt.loadExecutableFromVFS("/bin/sh", { argv: ["/bin/sh", "-i"], execPath: "/bin/sh" });
+    running = true;
+    cmd.disabled = false;
+    cmd.focus();
+    await rt.runAsync({ maxSteps: 2_000_000_000, yieldEvery: 2048 });
+    running = false;
+    cmd.disabled = true;
+    println("[process exited]", "ok");
+  } catch (e) {
+    running = false;
+    cmd.disabled = true;
+    println(`\n[emulator stopped] ${e.message}`, "err");
+    if (e.registers) println(JSON.stringify(e.registers, null, 2));
+  }
+};
+runRelease.onclick = async () => {
+  if (!rt) return;
+  try {
+    println("[exec] /bin/cat /etc/alpine-release", "ok");
+    rt.loadExecutableFromVFS("/bin/cat", { argv: ["/bin/cat", "/etc/alpine-release"], execPath: "/bin/cat" });
+    const result = await rt.runAsync({ maxSteps: 50_000_000, yieldEvery: 2048 });
+    println(`\n[exit ${result.exitCode}]`, "ok");
+  } catch (e) {
+    println(`\n[emulator stopped] ${e.message}`, "err");
+    if (e.registers) println(JSON.stringify(e.registers, null, 2));
+  }
+};
+cmd.addEventListener("keydown", ev => {
+  if (ev.key === "Enter") {
+    const line = cmd.value;
+    cmd.value = "";
+    if (running) stdin.push(line + "\n");
+  }
+});
+saveSnapshot.onclick = async () => {
+  if (!rt) return;
+  try { const r = await saveVfsSnapshot(rt.vfs, "alpine-rootfs"); println(`[snapshot] saved ${r.bytes} bytes to IndexedDB`, "ok"); }
+  catch (e) { println(`[snapshot error] ${e.message}`, "err"); }
+};
+restoreSnapshot.onclick = async () => {
+  try {
+    const vfs = await loadVfsSnapshot("alpine-rootfs");
+    if (!vfs) { println("[snapshot] no saved snapshot found", "warn"); return; }
+    newRuntime(); rt.vfs = vfs; rt.syscalls.vfs = vfs;
+    startShell.disabled = runRelease.disabled = saveSnapshot.disabled = false;
+    println("[snapshot] restored VFS snapshot from IndexedDB", "ok");
+  } catch (e) { println(`[snapshot error] ${e.message}`, "err"); }
+};
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+clear.onclick = () => term.textContent = "";
+println("OpenX86 Alpine demo ready. Load or restore the x86 minirootfs, start the gateway if you need network, then start /bin/sh.");
+</script>

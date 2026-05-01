@@ -1,0 +1,61 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>x86_64 witness</title></head>
+<body>
+<pre id="out">loading...</pre>
+<script type="module">
+window.__debug = window.__debug ?? {};
+const log = (m) => { document.getElementById("out").textContent += "\n" + m; };
+let swReg = null, swCacheHits = 0;
+try {
+  if ("serviceWorker" in navigator) {
+    swReg = await navigator.serviceWorker.register("/public/openx86-sw.js");
+    await navigator.serviceWorker.ready;
+    log("SW registered scope=" + swReg.scope + " state=" + (swReg.active?.state || "(activating)"));
+  }
+  const t0 = performance.now();
+  const probe = await fetch("/containers/blinkenlib.wasm", { method: "HEAD" });
+  log("wasm HEAD: status=" + probe.status + " elapsed=" + Math.round(performance.now() - t0) + "ms");
+  const { createBlinkHostBrowser } = await import("/src/x86_64-blink-browser.js");
+  const host = await createBlinkHostBrowser({ wasmUrl: "/containers/blinkenlib.wasm", glueUrl: "/containers/blinkenlib.js" });
+  log("host ready, clstruct=" + host.clstruct + " mem=" + host.Module.wasmExports.memory.buffer.byteLength);
+  const elf = new Uint8Array(await (await fetch("/containers/hello-x86_64.elf")).arrayBuffer());
+  log("elf bytes=" + elf.length);
+  const r = await host.runElf(elf);
+  log("exit=" + r.exitCode + " stdout=" + JSON.stringify(r.stdout) + " stderr=" + JSON.stringify(r.stderr));
+  const mem = host.Module.wasmExports.memory;
+  const dv = new DataView(mem.buffer);
+  const struct = host.clstruct;
+  const off = (i) => dv.getUint32(struct + i * 4, true);
+  const u64at = (p) => dv.getBigUint64(p, true);
+  const regs = {
+    rip: u64at(off(9)).toString(16), rsp: u64at(off(10)).toString(16),
+    rbp: u64at(off(11)).toString(16), rsi: u64at(off(12)).toString(16),
+    rdi: u64at(off(13)).toString(16), rax: u64at(off(22)).toString(16),
+    rbx: u64at(off(23)).toString(16), rcx: u64at(off(24)).toString(16),
+    rdx: u64at(off(25)).toString(16),
+    r8: u64at(off(14)).toString(16), r9: u64at(off(15)).toString(16),
+    r10: u64at(off(16)).toString(16), r11: u64at(off(17)).toString(16),
+    r12: u64at(off(18)).toString(16), r13: u64at(off(19)).toString(16),
+    r14: u64at(off(20)).toString(16), r15: u64at(off(21)).toString(16),
+    flags: dv.getUint32(off(7), true).toString(16)
+  };
+  log("registers post-exit: rip=" + regs.rip + " rax=" + regs.rax + " rdi=" + regs.rdi);
+  window.__debug.x86_64 = {
+    host, exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr,
+    registers: regs, ready: true,
+    sw: swReg ? { scope: swReg.scope, controller: !!navigator.serviceWorker.controller } : null,
+    runElf: (bytes, opts) => host.runElf(bytes, opts),
+    pushStdin: (bytes) => host.pushStdin(bytes),
+    async testCacheHit() {
+      const t0 = performance.now();
+      const r = await fetch("/containers/blinkenlib.wasm");
+      const buf = await r.arrayBuffer();
+      return { bytes: buf.byteLength, elapsed: performance.now() - t0, fromSW: r.headers.get("x-served-by") || "(unknown)" };
+    }
+  };
+} catch (e) {
+  log("FAIL: " + (e && (e.stack || e.message)));
+  window.__debug.x86_64 = { error: String(e?.message || e), ready: true };
+}
+</script>
+</body></html>

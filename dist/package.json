@@ -1,0 +1,43 @@
+{
+  "name": "xstate-linux-os-emulator-cleanroom",
+  "version": "0.5.1",
+  "type": "module",
+  "description": "Clean-room XState-orchestrated browser/Node i386 Linux userspace emulator with ELF loading, VFS overlay, networking bridge, CLI, tests and benchmarks",
+  "bin": {
+    "xos": "./bin/xos.mjs"
+  },
+  "scripts": {
+    "demo": "node tools/run-hello.mjs",
+    "run": "node tools/run-elf.mjs",
+    "make-samples": "node tools/make-samples.mjs",
+    "test": "node tools/run-tests.mjs > .xos-test.log 2>&1; status=$?; cat .xos-test.log; exit $status",
+    "test:basic": "node tests/basic.mjs",
+    "test:cpu": "node tests/cpu-extensions.mjs",
+    "test:parity": "node tests/parity.mjs",
+    "test:cli": "node tests/cli.mjs",
+    "typecheck": "node tools/typecheck.mjs",
+    "build": "node tools/build.mjs",
+    "benchmark": "node tools/benchmark.mjs",
+    "vfs-demo": "node tools/run-vfs-demo.mjs",
+    "demo:vfs": "node tools/run-vfs-demo.mjs",
+    "gateway": "node tools/net-gateway.mjs",
+    "fetch:alpine": "node tools/fetch-alpine-rootfs.mjs",
+    "alpine-smoke": "node tools/run-alpine-smoke.mjs",
+    "alpine:smoke": "node tools/run-alpine-smoke.mjs",
+    "serve": "python3 -m http.server 8000",
+    "ci": "node tools/typecheck.mjs && node tools/run-tests.mjs > .xos-test.log 2>&1; status=$?; cat .xos-test.log; test $status -eq 0 && node tools/build.mjs",
+    "xos": "node bin/xos.mjs",
+    "test:conformance": "node tests/conformance.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./browser": "./src/index.js",
+    "./node": "./src/node.js",
+    "./network-node": "./src/network-node.js"
+  },
+  "browser": "./src/index.js"
+}

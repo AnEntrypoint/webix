@@ -1,0 +1,104 @@
+name: Rebuild Blink wasm (x86_64 backend)
+
+on:
+  workflow_dispatch:
+    inputs:
+      blink_repo:
+        description: "Blink fork to build"
+        type: string
+        default: "robalb/blink"
+      blink_ref:
+        description: "Branch/tag/sha"
+        type: string
+        default: "libblink"
+      with_node_env:
+        description: "Add node to ENVIRONMENT (frees us from polyfill)"
+        type: boolean
+        default: true
+  push:
+    paths:
+      - ".github/workflows/build-blink.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout webix
+        uses: actions/checkout@v4
+
+      - name: Install emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.69
+
+      - name: Clone blink fork
+        env:
+          BLINK_REPO: ${{ inputs.blink_repo || 'robalb/blink' }}
+          BLINK_REF: ${{ inputs.blink_ref || 'libblink' }}
+        run: |
+          echo "cloning $BLINK_REPO@$BLINK_REF"
+          git clone --depth 1 --branch "$BLINK_REF" "https://github.com/$BLINK_REPO.git" libblink
+
+      - name: Configure (emconfigure --disable-all + ESM exports)
+        working-directory: libblink
+        env:
+          WITH_NODE_ENV: ${{ inputs.with_node_env }}
+        run: |
+          ENV_VAL="web,worker,node"
+          if [ "$WITH_NODE_ENV" = "false" ]; then ENV_VAL="web,worker"; fi
+          EXPORTS='"UTF8ToString","stringToNewUTF8","AsciiToString","FS","callMain","addFunction","wasmExports"'
+          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sFORCE_FILESYSTEM=1 -lnodefs.js -lidbfs.js"
+          emconfigure ./configure --disable-all \
+            LDFLAGS="$EFLAGS" \
+            CPPFLAGS="-DHTML -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_GNU_SOURCE"
+
+      - name: Compile (emmake make blinkenlib)
+        working-directory: libblink
+        run: |
+          emmake make o//blink/blinkenlib.js -j$(nproc)
+          ls -la o/blink/blinkenlib.* || true
+
+      - name: Stage artifacts under containers/
+        run: |
+          echo "== libblink output search =="
+          find libblink -name 'blinkenlib*' -type f 2>/dev/null | head
+          WASM=$(find libblink -name 'blinkenlib.wasm' -type f | head -1)
+          JS=$(find libblink -name 'blinkenlib.js' -type f | head -1)
+          if [ -z "$WASM" ] || [ -z "$JS" ]; then
+            echo "blinkenlib outputs not found; full o/ listing:"
+            find libblink/o -maxdepth 5 -type f 2>/dev/null | head -50
+            exit 1
+          fi
+          cp "$WASM" containers/blinkenlib.wasm
+          cp "$JS"   containers/blinkenlib.js
+          sha1sum containers/blinkenlib.wasm containers/blinkenlib.js
+
+      - name: Smoke test (node, hand-built ELF)
+        run: |
+          node --experimental-vm-modules --no-warnings <<'EOF'
+          const { createBlinkHost } = await import("./src/x86_64-blink.js");
+          const fs = await import("node:fs");
+          const host = await createBlinkHost({});
+          const elf = fs.readFileSync("containers/hello-x86_64.elf");
+          const r = await host.runElf(elf, { argv: ["hello"], progname: "/program" });
+          if (r.exitCode !== 42) { console.error("smoke fail", r); process.exit(1); }
+          console.log("smoke ok exit=42 stdout=", JSON.stringify(r.stdout));
+          EOF
+
+      - name: Commit rebuilt artifacts
+        env:
+          BLINK_REPO: ${{ inputs.blink_repo || 'robalb/blink' }}
+          BLINK_REF: ${{ inputs.blink_ref || 'libblink' }}
+        run: |
+          git config user.email "github-actions@users.noreply.github.com"
+          git config user.name "github-actions"
+          git add containers/blinkenlib.wasm containers/blinkenlib.js
+          if git diff --cached --quiet; then
+            echo "no changes"; exit 0
+          fi
+          SHA=$(sha1sum containers/blinkenlib.wasm | cut -c1-12)
+          git commit -m "ci(blink): rebuild blinkenlib.wasm $SHA from $BLINK_REPO@$BLINK_REF"
+          git push
