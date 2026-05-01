@@ -64,6 +64,16 @@ ingested to rs-learn (webix v0.6.1 architecture, kernel, browser split,
 npm pack, CI, licenses, deleted files). Next cycle will test recall on
 all 10 + re-sample these 5 to measure learning curve.
 
+**Cycle 2 (2026-05-01, webix v0.6.2)**: 7 new facts ingested
+(blink-core polling removal, host.capabilities API, service worker
+deletion, gitattributes config, test.js dedup pattern, browser-witness
+protocol, memorize scope guard). Audit sampled 5 stable AGENTS.md items
+(Blink owns surface, test.js single, xstate v5, kernel.reap, browser
+entry point). All 5 returned no recall results — rs-learn store is still
+populating. Added non-obvious caveat to AGENTS.md: blink-core overlap
+guard prevents runElf re-entrance. 0 items migrated this cycle. Store
+expected to be ready for recall migrations in Cycle 3.
+
 
 ## Browser witness pattern
 
@@ -80,6 +90,18 @@ Edits to browser-facing code (`public/*.html`, `src/x86_64-blink-browser.js`,
 The witness page surface lives at `installWindowDebug` in
 `src/x86_64-witness-bootstrap.js`. Don't duplicate the host-load /
 register-dump logic into other pages — extend that module instead.
+
+## blink-core polling removed (v0.6.2+)
+
+`runElf()` in blink-core no longer polls. Instead it returns a deferred
+Promise that resolves when exit/signal callbacks fire. Wall time for full
+test.js dropped from ~5s to ~2.4s as a side effect.
+
+**Critical**: A guard `if(exitDeferred) throw new Error("blink-core: previous
+run not yet settled")` now prevents overlapping `runElf()` calls. Overlapping
+runs were always unsafe (shared mutable stdoutBuf, lastSignal, lastExitCode
+across calls) but used to corrupt silently. Now they fail loud. If test.js
+calls runElf in a loop, ensure each Promise settles before the next call.
 
 ## Build flag residuals (Blink wasm)
 
