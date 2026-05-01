@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.6.1] — Second-pass re-architecture
+
+- src/blink-core.js (142L): shared Blink host core. Tar mount, NODEFS,
+  runElf, snapshot/restore, register accessor, runShellScript all live
+  here as a dispatch table over a single Module instance.
+- src/x86_64-blink.js shrinks from 149L to 22L: just the Node-flavored
+  shim (fs.readFileSync + ensureWebEnv + pathToFileURL import).
+- src/x86_64-blink-browser.js shrinks to 10L: fetch + factory + delegate.
+  Browser host now has FULL parity with Node — snapshot, restore, tar
+  mount, runShellScript, NODEFS — for free, via the shared core.
+- src/x86_64-witness-bootstrap.js: extracts the witness page boot logic
+  (host load, ELF run, register dump, window.__debug.x86_64 install)
+  out of inline HTML.
+- public/x86_64-witness.html drops from 60L of inline JS to 23L total
+  (one import + call). Browser witness passes via puppeteer:
+  exitCode=42, stdout="hi\n", rax=0x3c, rdi=0x2a, rip=0x4000a4.
+- src/browser.js: dedicated browser entry, no node:fs in its import
+  graph. package.json "browser" field + ./browser export point at it.
+  Fixes a real bug where importing webix from a browser bundle pulled
+  in node:fs through the Node host transitively.
+- package.json gains: files allowlist (npm publish ships only src/,
+  bin/, public/, blinkenlib.{wasm,js}, README, CHANGELOG, LICENSE,
+  NOTICE, AGENTS — not the 4MB rootfs/test-elf bundle), repository,
+  homepage, bugs, keywords, author, prepublishOnly:"node test.js".
+  Conditional exports: node→index.js, browser→browser.js.
+- kernel.js: gains reap(pid) — explicit cleanup. Auto-delete-on-EXIT
+  was rejected because test.js asserts the exited process remains
+  inspectable in snapshot (POSIX wait() semantics in miniature).
+- containers/blink-wrapper.ts (755L upstream reference, never imported,
+  imports from non-existent paths) deleted.
+- tsconfig.json deleted (no consumer; no typecheck script; no .d.ts).
+- AGENTS.md, NOTICE.md added. LICENSE copyright updated to AnEntrypoint
+  contributors. NOTICE attributes Blink (ISC), Alpine (GPL-2.0),
+  busybox (GPL-2.0), xstate (MIT).
+- test.yml: Node 20 + 22 matrix, concurrency.cancel-in-progress.
+- 11/11 test.js still pass + browser host now witnessed end-to-end.
+
+# Changelog
+
 ## [0.6.0] — Blink-only re-architecture
 
 - Removed: src/cpu.js (804L IA-32 interpreter), src/syscalls.js (767L Linux i386

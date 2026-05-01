@@ -18,12 +18,19 @@ export class XOSKernel {
     this.processActors.set(pid,proc);
     this.kernelActor.send({type:"SPAWN",pid,process:proc});
     proc.send({type:"START"});
-    const r=await host.runElf(bytes,{argv,progname});
-    proc.send({type:"EXIT",code:r.exitCode});
-    this.kernelActor.send({type:"EXIT",pid});
-    return { pid, exitCode:r.exitCode, stdout:r.stdout, stderr:r.stderr, signal:r.signal };
+    try{
+      const r=await host.runElf(bytes,{argv,progname});
+      proc.send({type:"EXIT",code:r.exitCode});
+      this.kernelActor.send({type:"EXIT",pid});
+      return { pid, exitCode:r.exitCode, stdout:r.stdout, stderr:r.stderr, signal:r.signal };
+    }catch(e){
+      proc.send({type:"FAULT",error:e});
+      this.kernelActor.send({type:"FAULT",error:e,pid});
+      throw e;
+    }
   }
   signal(pid,signal){ const p=this.processActors.get(pid); if(p) p.send({type:"SIGNAL",signal}); return !!p }
+  reap(pid){ const p=this.processActors.get(pid); if(!p) return null; const snap=p.getSnapshot(); if(snap.value==="exited"||snap.value==="faulted"){ this.processActors.delete(pid); return snap } return null }
   snapshot(){
     return {
       kernel:this.kernelActor.getSnapshot(),

@@ -37,14 +37,17 @@ Browser variant in `./blink-browser`. Witness page at `public/x86_64-witness.htm
 ## Architecture
 
 ```
-src/elf.js          ELF32/ELF64 header parse — 30L
-src/arch.js         I386/X86_64 architecture dispatch — 28L
-src/machines.js     XState 5 kernel/process/scheduler actors — 56L
-src/kernel.js       XOSKernel — Blink host + actor lifecycle — 36L
-src/x86_64-blink.js Node host: createBlinkHost — 149L
-src/x86_64-blink-browser.js Browser host: createBlinkHostBrowser — 65L
-src/index.js        Public exports — 6L
-test.js             Single integration suite, 11 cases — <200L
+src/elf.js                       ELF32/ELF64 header parse — 30L
+src/arch.js                      I386/X86_64 architecture dispatch — 28L
+src/machines.js                  XState 5 kernel/process/scheduler actors — 56L
+src/kernel.js                    XOSKernel — Blink host + actor lifecycle — 43L
+src/blink-core.js                Shared Blink core: tar, snapshot, runElf, runShellScript — 142L
+src/x86_64-blink.js              Node host shim — 22L
+src/x86_64-blink-browser.js      Browser host shim — 10L
+src/x86_64-witness-bootstrap.js  installWindowDebug helper — 25L
+src/index.js                     Node entry — 4L
+src/browser.js                   Browser entry (no node:fs) — 6L
+test.js                          Single integration suite, 11 cases — <200L
 ```
 
 XState 5 (real npm package) drives the kernel/process/scheduler state machines. No bespoke runtime — the i386 interpreter, custom VFS, syscall dispatcher, and tar/package layers were removed in favor of Blink's upstream coverage.

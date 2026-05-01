@@ -8,20 +8,56 @@
   },
   "scripts": {
     "test": "node test.js",
-    "xos": "node bin/xos.mjs"
+    "xos": "node bin/xos.mjs",
+    "prepublishOnly": "node test.js"
   },
   "license": "MIT",
   "engines": {
     "node": ">=18"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnEntrypoint/webix.git"
+  },
+  "homepage": "https://github.com/AnEntrypoint/webix#readme",
+  "bugs": {
+    "url": "https://github.com/AnEntrypoint/webix/issues"
+  },
+  "keywords": [
+    "blink",
+    "emulator",
+    "linux",
+    "x86_64",
+    "wasm",
+    "userspace",
+    "xstate"
+  ],
+  "author": "lanmower",
+  "files": [
+    "src/",
+    "bin/",
+    "public/",
+    "containers/blinkenlib.wasm",
+    "containers/blinkenlib.js",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE.md",
+    "AGENTS.md"
+  ],
   "exports": {
-    ".": "./src/index.js",
-    "./browser": "./src/index.js",
+    ".": {
+      "node": "./src/index.js",
+      "browser": "./src/browser.js",
+      "default": "./src/index.js"
+    },
+    "./browser": "./src/browser.js",
     "./blink": "./src/x86_64-blink.js",
     "./blink-browser": "./src/x86_64-blink-browser.js",
+    "./blink-core": "./src/blink-core.js",
     "./kernel": "./src/kernel.js"
   },
-  "browser": "./src/index.js",
+  "browser": "./src/browser.js",
   "dependencies": {
     "xstate": "^5.18.0"
   }
