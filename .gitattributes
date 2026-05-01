@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+*.wasm binary
+*.elf binary
+*.tar.gz binary
+*.apk binary
+*.png binary
+*.jpg binary
+*.ico binary
+package-lock.json -diff

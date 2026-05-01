@@ -63,3 +63,33 @@ restore list). rs-learn was fresh (0 prior ingests). 0 items migrated
 ingested to rs-learn (webix v0.6.1 architecture, kernel, browser split,
 npm pack, CI, licenses, deleted files). Next cycle will test recall on
 all 10 + re-sample these 5 to measure learning curve.
+
+
+## Browser witness pattern
+
+Edits to browser-facing code (`public/*.html`, `src/x86_64-blink-browser.js`,
+`src/x86_64-witness-bootstrap.js`, `src/browser.js`) must be witnessed via
+`exec:browser` in the same turn as the edit:
+
+1. Spin a static server (any will do; `exec:nodejs` http server works).
+2. `page.goto("http://localhost:PORT/public/x86_64-witness.html")`.
+3. `page.waitForFunction(() => window.__debug?.x86_64?.ready === true)`.
+4. `page.evaluate(() => window.__debug.x86_64)` — assert
+   `exitCode===42`, `registers.rax==="3c"`, `registers.rdi==="2a"`.
+
+The witness page surface lives at `installWindowDebug` in
+`src/x86_64-witness-bootstrap.js`. Don't duplicate the host-load /
+register-dump logic into other pages — extend that module instead.
+
+## Build flag residuals (Blink wasm)
+
+The vendored `containers/blinkenlib.wasm` is built `POSIX NOJIT NOSOCK`:
+
+- AVX/AVX-512 traps SIGILL — only SSE2 verified. Test
+  `containers/sse2-test.elf` succeeds; `avx-test.elf` returns 132.
+- `socket(AF_INET)` returns ENOSYS. Test asserts this directly.
+- pthread_create — single-threaded.
+
+These are upstream-Blink-build concerns, not host work. To unblock,
+use `gh workflow run build-blink.yml` with a different blink_repo
+fork patched for sockets/threads/AVX.

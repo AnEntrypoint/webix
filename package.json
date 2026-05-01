@@ -1,6 +1,6 @@
 {
   "name": "webix",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "type": "module",
   "description": "Blink-backed x86_64 Linux userspace emulator with XState orchestration. Browser + Node.",
   "bin": {

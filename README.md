@@ -57,6 +57,26 @@ XState 5 (real npm package) drives the kernel/process/scheduler state machines. 
 11/11 integration cases in `test.js`:
 ELF64 dispatch · hand-built hello (exit 42) · kernel API + ProcessActor · musl-static busybox (echo/uname/expr) · alpine dynamic /bin/busybox + /sbin/apk via ld-musl · multi-line sh script from MEMFS · runShellScript · byte-exact snapshot/restore of wasm memory + registers · SSE2 round-trip · AVX SIGILL boundary · NODEFS host passthrough · NOSOCK ENOSYS witness.
 
+
+## Run the witness page locally
+
+The browser host runs in any static server. The wasm must be served with
+`Content-Type: application/wasm` (most servers infer this from the
+extension; check yours if you see `MIME type ... is not supported`).
+
+```bash
+node -e 'const http=require("http"),fs=require("fs"),path=require("path"); \
+  const m={".html":"text/html",".js":"text/javascript",".wasm":"application/wasm",".elf":"application/octet-stream"}; \
+  http.createServer((q,r)=>fs.readFile(path.resolve("."+q.url.split("?")[0]),(e,d)=>{ \
+    if(e){r.writeHead(404);r.end()} \
+    else{r.writeHead(200,{"content-type":m[path.extname(q.url).toLowerCase()]||"application/octet-stream"});r.end(d)}})) \
+  .listen(8000,()=>console.log("http://localhost:8000/public/x86_64-witness.html"))'
+```
+
+Open the URL and inspect `window.__debug.x86_64` in DevTools — it
+exposes `exitCode`, `stdout`, `stderr`, hex `registers`,
+`runElf(bytes, opts)`, `pushStdin(bytes)`, `snapshot()`.
+
 ## Build-flag residuals
 
 This Blink build is `POSIX NOJIT NOSOCK`. Genuine residuals require an emscripten rebuild of `jart/blink`:

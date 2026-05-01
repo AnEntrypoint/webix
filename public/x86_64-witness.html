@@ -1,16 +1,13 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>x86_64 witness</title></head>
+<html><head><meta charset="utf-8"><title>x86_64 witness</title>
+<link rel="preload" href="/containers/blinkenlib.wasm" as="fetch" type="application/wasm" crossorigin>
+</head>
 <body>
 <pre id="out">loading...</pre>
 <script type="module">
 const out=document.getElementById("out");
 const log=(m)=>{ out.textContent+="\n"+m };
 try{
-  if("serviceWorker" in navigator){
-    const reg=await navigator.serviceWorker.register("/public/openx86-sw.js");
-    await navigator.serviceWorker.ready;
-    log("SW registered scope="+reg.scope);
-  }
   const { installWindowDebug } = await import("/src/x86_64-witness-bootstrap.js");
   await installWindowDebug({ onLog: log });
 }catch(e){

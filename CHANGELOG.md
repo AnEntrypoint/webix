@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.6.2] — Third-pass policy alignment
+
+- blink-core.js: replaced setTimeout(5) busy-wait with deferred Promise
+  resolved by the exit/signal callbacks. test.js wall time drops from
+  ~5s to ~2.4s. Added a runtime guard ("previous run not yet settled")
+  that fails loud on overlapping runElf calls instead of silently
+  corrupting shared state.
+- blink-core.js: surface a host.capabilities object: { tarMount, nodefs,
+  nosock, vectorISA: "sse2" }. Replaces the FS.filesystems sniff in
+  test.js with a one-line check.
+- test.js: deduped via three module-level constants (ALPINE_TAR, HELLO,
+  BUSYBOX_STATIC) and helpers (alpineHost(), guestBytes()). Eight cases
+  no longer re-gunzip the same 3.5MB rootfs. Drops from 160L to 141L.
+- public/openx86-sw.js (47L) deleted: unwitnessed cache-firsting code
+  with no version-bump strategy. Repeat-load caching belongs to the
+  deployment server's Cache-Control headers, not to this repo.
+- public/x86_64-witness.html: dropped SW registration, added wasm
+  preload hint. Browser witness still passes via exec:browser:
+  exitCode=42, rax=0x3c, rdi=0x2a, rip=0x4000a4, hasSW=false.
+- .gitattributes: `* text=auto eol=lf` + binary markers for
+  *.wasm *.elf *.tar.gz *.apk. Ends the recurring CRLF warnings on
+  Windows commits.
+- .editorconfig: 2-space, LF, UTF-8 across the repo.
+- .nvmrc: pins Node 22 for local dev (CI matrix still tests 20+22).
+- AGENTS.md: gains "Browser witness pattern" section documenting the
+  exec:browser → installWindowDebug → page.evaluate flow, and a
+  "Build flag residuals" section noting the POSIX NOJIT NOSOCK build.
+- README.md: gains "Run the witness page locally" with a one-line
+  static server invocation.
+- package.json bumps to 0.6.2; files allowlist drops openx86-sw.js.
+
+# Changelog
+
 ## [0.6.1] — Second-pass re-architecture
 
 - src/blink-core.js (142L): shared Blink host core. Tar mount, NODEFS,

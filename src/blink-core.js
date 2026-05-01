@@ -69,8 +69,13 @@ function makeRegisterAccessor(Module, clstruct){
 }
 
 export async function createBlinkCore({ wasmBinary, factory, options={} }){
-  let stdoutBuf="", stderrBuf="", exitCode=null, lastSignal=null;
+  let stdoutBuf="", stderrBuf="", lastSignal=null, lastExitCode=null;
+  let exitDeferred=null;
   const stdinQueue=options.stdinBytes?[...options.stdinBytes].reverse():[];
+  function settleExit(code){
+    lastExitCode=code;
+    if(exitDeferred){ const d=exitDeferred; exitDeferred=null; d.resolve(code) }
+  }
   const Module=await factory({
     noInitialRun:true, wasmBinary,
     preRun:(M)=>{
@@ -82,11 +87,11 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
     }
   });
   const signalCb=Module.addFunction((sig,code)=>{
-    if(sig!==SIGTRAP){ lastSignal={sig,code}; exitCode=128+sig; return }
+    if(sig!==SIGTRAP){ lastSignal={sig,code}; settleExit(128+sig); return }
     if(code===BLINK_PREEMPT) Module._blinkenlib_preempt_resume();
     else if(code===BLINK_FAKE_TTY){ if(options.onTtyPause) options.onTtyPause(); else Module._blinkenlib_faketty_resume() }
   },"vii");
-  const exitCb=Module.addFunction((code)=>{ exitCode=code },"vi");
+  const exitCb=Module.addFunction((code)=>{ settleExit(code) },"vi");
   Module.callMain([signalCb.toString(), exitCb.toString()]);
   const clstruct=Module._blinkenlib_get_clstruct();
   const argcPtr=Module._blinkenlib_get_argc_string();
@@ -101,6 +106,7 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   }
   return {
     Module, clstruct,
+    capabilities:{ tarMount:true, nodefs:!!Module.FS.filesystems?.NODEFS, nosock:true, vectorISA:"sse2" },
     mountTarBytes(tarBytes, onError){ extractTarToFS(Module.FS, tarBytes, onError) },
     mountNodeDir(hostDir, guestDir="/host"){
       const FS=Module.FS;
@@ -110,6 +116,7 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       return guestDir;
     },
     async runElf(bytes,{ argv=[], progname="/program" }={}){
+      if(exitDeferred) throw new Error("blink-core: previous run not yet settled");
       const FS=Module.FS;
       const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
       try{ FS.unlink("/program") }catch(_){}
@@ -118,9 +125,10 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       writeStr(prognamePtr,progname,200);
       writeStr(argcPtr, argv.length?argv.join(" "):progname, 200);
       writeStr(argvPtr,"",200);
-      stdoutBuf=""; stderrBuf=""; exitCode=null; lastSignal=null;
+      stdoutBuf=""; stderrBuf=""; lastSignal=null; lastExitCode=null;
+      const done=new Promise((resolve,reject)=>{ exitDeferred={resolve,reject} });
       Module._blinkenlib_run();
-      while(exitCode===null) await new Promise(r=>setTimeout(r,5));
+      const exitCode=await done;
       return { exitCode, stdout:stdoutBuf, stderr:stderrBuf, signal:lastSignal };
     },
     pushStdin(bytes){ for(const b of [...bytes].reverse()) stdinQueue.unshift(b) },
@@ -133,7 +141,7 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
     },
     snapshot(){
       const s=regs.snapshot();
-      return { ...s, exitCode, stdoutTail:stdoutBuf.slice(-4096), stderrTail:stderrBuf.slice(-4096) };
+      return { ...s, exitCode:lastExitCode, stdoutTail:stdoutBuf.slice(-4096), stderrTail:stderrBuf.slice(-4096) };
     },
     restore(snap){ regs.restore(snap) },
     readRegisters(){ return regs.readRegisters() }
