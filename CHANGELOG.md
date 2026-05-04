@@ -1,5 +1,26 @@
 # Changelog
 
+## [unreleased] — gh-pages demo redesign (247420 storytelling)
+
+- docs/index.html: rewritten as a 247420-shaped story. `installStyles()`
+  + `ds-ready` reveal animation, `C.AppShell` host with topbar/crumb/
+  status, `C.Panel`/`C.RowLink` rows for architecture (6 invariants:
+  blink owns cpu, <200L files, xstate v5, node+bun parity, browser
+  witnessed, POSIX NOJIT NOSOCK caveats) and what-runs (hello, busybox
+  echo/uname/expr, sse2-test, snapshot). Live-witness panel surfaces
+  ready/exit/registers/stdout/log directly off `window.__debug.x86_64`
+  with sse2-test.elf added as a button. One acid moment in Archivo
+  Black: "real busybox. real elf. in this tab." Lowercase voice
+  throughout. SDK pulled `@latest` via importmap + `<link rel=stylesheet>`
+  from unpkg, no build step. Witness asserts pass: ready=true,
+  exitCode=42, rax=0x3c, rdi=0x2a, busybox uname -a runs cleanly.
+- .github/workflows/pages.yml: sync `containers/sse2-test.elf` into
+  `docs/assets/` so the new sse2 demo button has a target post-deploy.
+- AGENTS.md: confirm Cycle-4 gh-pages gotchas (`__debug` getter,
+  `/webix/` base-path) re-witnessed under the redesign — both still
+  hold; AGENTS.md text updated to mention the new panel layout and
+  sse2 ELF.
+
 ## [unreleased] — GitHub Pages live demo
 
 - docs/index.html: styled landing + live x86_64 demo. AppShell/Topbar/

@@ -74,6 +74,16 @@ populating. Added non-obvious caveat to AGENTS.md: blink-core overlap
 guard prevents runElf re-entrance. 0 items migrated this cycle. Store
 expected to be ready for recall migrations in Cycle 3.
 
+**Cycle 4 (2026-05-01, gh-pages deploy)**: 6 new facts ingested
+(gh-pages live URL + witness, anentrypoint-design SDK shape,
+`window.__debug` getter trap, pages workflow layout, Pages enablement
+prerequisite, witness-bootstrap base-path gotcha). Re-sampled 5 stable
+items (Blink owns surface, single test.js, xstate v5, kernel.reap,
+browser entry split) — all 5 still return no recall results. Four
+cycles in, no migrations yet; store population continues. Added new
+"gh-pages demo (docs/)" section with the two non-obvious deploy
+gotchas. 0 items migrated this cycle.
+
 **Cycle 3 (2026-05-01, webix v0.6.2 full validation)**: 6 new facts
 ingested (v0.6.2 node+bun parity, CLI verb shapes, witness register
 expectations, snapshot key shape, mprotect noise advisory, port-8765
@@ -95,6 +105,33 @@ box). 0 items migrated this cycle.
 - **Bun parity.** `bun test.js` passes 11/11 alongside Node 23.10.0 —
   file:// dynamic import + emscripten glue + wasm load all work in Bun
   1.3.8 without modification. Both runtimes are first-class for tests.
+
+## gh-pages demo (docs/)
+
+webix ships a live demo at https://anentrypoint.github.io/webix/ via
+`.github/workflows/pages.yml`. The build step copies
+`containers/blinkenlib.{wasm,js}`, the hello/busybox/sse2-test ELFs,
+and `src/{blink-core,x86_64-blink-browser,x86_64-witness-bootstrap}.js`
+into `docs/assets/` (gitignored — repopulated by CI). The page mounts
+the design SDK via `installStyles()` + `mount(...)` and renders
+`C.AppShell` with hero / live-witness / acid / architecture /
+what-runs / quickstart panels — same `window.__debug.x86_64` contract
+the test suite asserts against. Two non-obvious caveats discovered
+during the v0.6.2 deploy (re-witnessed v0.6.3 redesign — both still
+hold):
+
+- **anentrypoint-design installs `window.__debug` as a non-writable
+  getter** at module load. Code that does
+  `window.__debug = window.__debug ?? {}` throws "Cannot assign to read
+  only property '__debug'". Use
+  `if(!window.__debug) Object.defineProperty(window,"__debug",{value:{},writable:true,configurable:true})`
+  then assign sub-keys (`.x86_64`) onto it.
+- **witness-bootstrap defaults are absolute (`/containers/...`)** and
+  break under `/webix/` on gh-pages. The demo page must pass explicit
+  URLs via `new URL('./assets/X', document.baseURI).href` so the dynamic
+  glue import inside `x86_64-blink-browser.js` doesn't double-resolve.
+- **First-time setup**: `gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow`
+  must run before the first push, or the deploy job fails.
 
 ## Browser witness pattern
 

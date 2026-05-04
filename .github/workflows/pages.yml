@@ -10,6 +10,7 @@ on:
       - "containers/blinkenlib.js"
       - "containers/hello-x86_64.elf"
       - "containers/busybox-x86_64.elf"
+      - "containers/sse2-test.elf"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -34,6 +35,7 @@ jobs:
           cp containers/blinkenlib.js       docs/assets/
           cp containers/hello-x86_64.elf    docs/assets/
           cp containers/busybox-x86_64.elf  docs/assets/
+          cp containers/sse2-test.elf       docs/assets/
           cp src/blink-core.js              docs/assets/
           cp src/x86_64-blink-browser.js    docs/assets/
           cp src/x86_64-witness-bootstrap.js docs/assets/

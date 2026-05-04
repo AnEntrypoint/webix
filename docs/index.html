@@ -3,42 +3,57 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>webix — x86_64 Linux userspace, in your browser</title>
-  <meta name="description" content="Blink-backed x86_64 Linux userspace emulator. ~280 lines of host code over a 240KB Blink wasm. Real busybox, real ELF, real syscalls — running live in this tab.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2316a34a'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='monospace' font-size='18' fill='white' font-weight='bold'%3Ex%3C/text%3E%3C/svg%3E">
+  <title>webix — x86_64 linux userspace, in your browser</title>
+  <meta name="description" content="blink-backed x86_64 linux userspace emulator. ~280 lines of host code over a 240KB blink wasm. real busybox, real ELF, real syscalls — running live in this tab.">
+  <meta property="og:title" content="webix">
+  <meta property="og:description" content="blink-backed x86_64 linux userspace, in your browser. real busybox, real ELF, real syscalls.">
+  <meta property="og:url" content="https://anentrypoint.github.io/webix/">
+  <link rel="canonical" href="https://anentrypoint.github.io/webix/">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%97%B0%3C/text%3E%3C/svg%3E">
+  <script type="importmap">{"imports":{"anentrypoint-design":"https://unpkg.com/anentrypoint-design@latest/dist/247420.js"}}</script>
   <link rel="stylesheet" href="https://unpkg.com/anentrypoint-design@latest/dist/247420.css">
   <link rel="preload" href="./assets/blinkenlib.wasm" as="fetch" type="application/wasm" crossorigin>
-  <script type="importmap">
-    { "imports": { "anentrypoint-design": "https://unpkg.com/anentrypoint-design@latest/dist/247420.js" } }
-  </script>
   <style>
-    body { margin: 0 }
-    #app { min-height: 100vh }
-    .demo-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; }
-    @media (min-width: 880px) { .demo-grid { grid-template-columns: 1fr 1fr } }
-    .demo-out { background: var(--panel-bg, #0b0b0b); color: var(--panel-fg, #e6e6e6); font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12.5px; padding: 0.75rem 1rem; border-radius: 8px; min-height: 9rem; max-height: 22rem; overflow: auto; white-space: pre-wrap; line-height: 1.45 }
-    .demo-regs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.25rem 1rem; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px }
-    .demo-regs > span { display: flex; justify-content: space-between; gap: 0.5rem }
-    .demo-regs b { color: var(--green, #16a34a); font-weight: 600 }
-    .demo-buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0 1rem 0 }
-    .demo-buttons button { font: inherit; cursor: pointer; padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid var(--rule, #d4d4d4); background: var(--surface, #fff); color: inherit }
-    .demo-buttons button:hover:not(:disabled) { background: var(--panel-select, #f0f0f0) }
-    .demo-buttons button:disabled { opacity: 0.5; cursor: wait }
-    .demo-status { font-family: "JetBrains Mono", monospace; font-size: 11.5px; opacity: 0.7; margin-top: 0.4rem }
-    .demo-card { padding: 1.25rem; border-radius: 10px; background: var(--panel-surface, #fafafa); border: 1px solid var(--rule, #ececec) }
-    .demo-card h3 { margin: 0 0 0.5rem 0; font-size: 0.95rem; letter-spacing: 0.02em; text-transform: lowercase }
-    .demo-card p { margin: 0 0 0.75rem 0; opacity: 0.8; font-size: 0.92rem }
-    .pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 99px; font-size: 11px; font-family: "JetBrains Mono", monospace; background: var(--green, #16a34a); color: white; vertical-align: middle }
-    .pill.warn { background: #c2410c }
-    .pill.idle { background: #6b7280 }
+    html,body{margin:0;padding:0}
+    body{background:var(--app-bg,#FBF6EB);color:var(--ink,#1F1B16);font-family:var(--ff-ui,'Nunito',system-ui,sans-serif)}
+    html:not(.ds-ready) body{visibility:hidden}
+    html.ds-ready body{visibility:visible;animation:ds-fade-in .18s ease-out both}
+    @keyframes ds-fade-in{from{opacity:0}to{opacity:1}}
+    .wb-wrap{max-width:1040px;margin:0 auto;padding:0 8px 64px}
+    .wb-grid{display:grid;gap:8px;grid-template-columns:1fr}
+    @media(min-width:920px){.wb-grid{grid-template-columns:1.05fr .95fr}}
+    .wb-out{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.5;background:var(--panel-2,#F1ECE0);color:var(--ink,#1F1B16);padding:12px 14px;border-radius:8px;min-height:8.5rem;max-height:22rem;overflow:auto;white-space:pre-wrap}
+    .wb-regs{display:grid;grid-template-columns:repeat(2,1fr);gap:2px 14px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;padding:10px 14px;background:var(--panel-2,#F1ECE0);border-radius:8px}
+    @media(min-width:520px){.wb-regs{grid-template-columns:repeat(4,1fr)}}
+    .wb-regs>span{display:flex;justify-content:space-between;gap:6px}
+    .wb-regs b{color:var(--accent,#16a34a);font-weight:700}
+    .wb-buttons{display:flex;flex-wrap:wrap;gap:6px;padding:0 0 12px 0}
+    .wb-row{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;opacity:.85;padding:0 0 8px 0}
+    .wb-row b{font-family:'Archivo Black',sans-serif;color:var(--ink,#1F1B16);text-transform:lowercase;letter-spacing:.02em}
+    .wb-pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;background:var(--accent,#16a34a);color:#fff;text-transform:lowercase}
+    .wb-pill.idle{background:#6b7280}
+    .wb-pill.warn{background:#c2410c}
+    .wb-pad{padding:14px 18px}
+    .wb-acid{font-family:'Archivo Black',sans-serif;text-transform:lowercase;letter-spacing:.01em;font-size:clamp(40px,9vw,96px);line-height:.95;margin:18px 8px 4px;color:var(--accent,#16a34a)}
+    .wb-acid em{font-style:normal;color:var(--ink,#1F1B16)}
+    .wb-tag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;text-transform:lowercase;opacity:.75;margin:0 8px 24px}
+    .wb-cli{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;padding:2px 0}
+    .wb-cli .p{color:var(--accent,#16a34a);margin-right:8px}
   </style>
 </head>
 <body>
   <div id="app">loading…</div>
 
   <script type="module">
-    import { mount, components as C, h } from 'anentrypoint-design';
+    import { mount, components as C, h, installStyles } from 'anentrypoint-design';
     import { installWindowDebug } from './assets/x86_64-witness-bootstrap.js';
+
+    installStyles();
+    document.documentElement.classList.add('ds-247420');
+    const reveal = () => document.documentElement.classList.add('ds-ready');
+    const fallbackReveal = setTimeout(reveal, 1500);
+
+    const ASSETS = new URL('./assets/', document.baseURI).href;
 
     const state = {
       status: 'idle',
@@ -47,20 +62,24 @@
       regs: null,
       stdout: '',
       stderr: '',
-      memBytes: null
+      memBytes: null,
+      lastCmd: ''
     };
 
     const log = (m) => { state.log.push(`[${new Date().toLocaleTimeString()}] ${m}`); render() };
 
+    function captureRegs(x){
+      const raw = x.host.readRegisters();
+      return Object.fromEntries(Object.entries(raw).map(([k,v])=>[k, typeof v==='bigint'?v.toString(16):v.toString(16)]));
+    }
+
     async function boot(){
-      state.status = 'booting';
-      render();
+      state.status = 'booting'; render();
       try {
-        const base = new URL('./assets/', document.baseURI).href;
         const x = await installWindowDebug({
-          wasmUrl: base + 'blinkenlib.wasm',
-          glueUrl: base + 'blinkenlib.js',
-          elfUrl: base + 'hello-x86_64.elf',
+          wasmUrl: ASSETS + 'blinkenlib.wasm',
+          glueUrl: ASSETS + 'blinkenlib.js',
+          elfUrl:  ASSETS + 'hello-x86_64.elf',
           argv: ['hello'],
           onLog: log
         });
@@ -68,6 +87,7 @@
         state.lastExit = x.exitCode;
         state.stdout = x.stdout;
         state.stderr = x.stderr;
+        state.lastCmd = 'hello-x86_64.elf';
         state.status = 'ready';
       } catch (e) {
         state.status = 'error';
@@ -76,25 +96,28 @@
       render();
     }
 
-    async function runHello(){
+    async function runWith(elf, argv, label){
       const x = window.__debug?.x86_64; if (!x) return;
-      state.status = 'running'; render();
-      const bytes = new Uint8Array(await (await fetch('./assets/hello-x86_64.elf')).arrayBuffer());
-      const r = await x.runElf(bytes, { argv: ['hello'] });
-      state.lastExit = r.exitCode; state.stdout = r.stdout; state.stderr = r.stderr;
-      state.regs = Object.fromEntries(Object.entries(x.host.readRegisters()).map(([k,v]) => [k, typeof v === 'bigint' ? v.toString(16) : v.toString(16)]));
-      state.status = 'ready'; log(`hello → exit=${r.exitCode}`); render();
+      state.status = 'running'; state.lastCmd = label; render();
+      try {
+        const bytes = new Uint8Array(await (await fetch(ASSETS + elf)).arrayBuffer());
+        const r = await x.runElf(bytes, { argv });
+        state.lastExit = r.exitCode; state.stdout = r.stdout; state.stderr = r.stderr;
+        state.regs = captureRegs(x);
+        state.status = 'ready';
+        log(`${label} → exit=${r.exitCode}`);
+      } catch (e) {
+        state.status = 'error';
+        log('FAIL: ' + (e?.message || e));
+      }
+      render();
     }
 
-    async function runBusybox(argv){
-      const x = window.__debug?.x86_64; if (!x) return;
-      state.status = 'running'; render();
-      const bytes = new Uint8Array(await (await fetch('./assets/busybox-x86_64.elf')).arrayBuffer());
-      const r = await x.runElf(bytes, { argv });
-      state.lastExit = r.exitCode; state.stdout = r.stdout; state.stderr = r.stderr;
-      state.regs = Object.fromEntries(Object.entries(x.host.readRegisters()).map(([k,v]) => [k, typeof v === 'bigint' ? v.toString(16) : v.toString(16)]));
-      state.status = 'ready'; log(`busybox ${argv.join(' ')} → exit=${r.exitCode}`); render();
-    }
+    const runHello   = () => runWith('hello-x86_64.elf',   ['hello'],                              'hello-x86_64.elf');
+    const runEcho    = () => runWith('busybox-x86_64.elf', ['echo','hi','from','busybox'],         'busybox echo');
+    const runUname   = () => runWith('busybox-x86_64.elf', ['uname','-a'],                         'busybox uname -a');
+    const runExpr    = () => runWith('busybox-x86_64.elf', ['expr','7','*','6'],                   'busybox expr 7 * 6');
+    const runSse2    = () => runWith('sse2-test.elf',      ['sse2-test'],                          'sse2-test.elf');
 
     function takeSnapshot(){
       const x = window.__debug?.x86_64; if (!x) return;
@@ -104,17 +127,17 @@
       render();
     }
 
-    window.__webixDemo = { boot, runHello, runBusybox, takeSnapshot, state };
+    window.__webixDemo = { boot, runHello, runEcho, runUname, runExpr, runSse2, takeSnapshot, state };
 
-    function statusPill(){
-      const cls = state.status === 'ready' ? '' : state.status === 'error' ? 'warn' : 'idle';
-      return h('span', { class: 'pill ' + cls }, state.status);
+    function pill(){
+      const cls = state.status === 'ready' ? '' : (state.status === 'error' ? 'warn' : 'idle');
+      return h('span', { class: 'wb-pill ' + cls }, state.status);
     }
 
     function regGrid(){
-      if (!state.regs) return h('div', { class: 'demo-status' }, '(boot to populate registers)');
+      if (!state.regs) return h('div', { class: 'wb-out', style:'min-height:6.5rem' }, '(boot to populate registers)');
       const order = ['rip','rax','rdi','rsi','rdx','rsp','rbp','rcx','r8','r9','r10','r11','r12','r13','r14','r15'];
-      return h('div', { class: 'demo-regs' },
+      return h('div', { class: 'wb-regs' },
         ...order.map(k => h('span', null,
           h('b', null, k),
           h('span', null, '0x' + (state.regs[k] || '0'))
@@ -122,68 +145,167 @@
       );
     }
 
-    function demoCard(){
+    function btn(label, onclick, disabled){
+      return C.Btn({ onclick, disabled, primary: false, children: label });
+    }
+
+    function livePanel(){
       const ready = state.status === 'ready' || state.status === 'running';
-      const busy = state.status === 'booting' || state.status === 'running';
-      return h('div', { class: 'demo-card', id: 'demo-runner' },
-        h('h3', null, 'live demo · ', statusPill()),
-        h('p', null, 'Boot the Blink wasm (~240 KB) and run a real x86_64 ELF. Output and registers update from the same window.__debug.x86_64 contract used by the test suite.'),
-        h('div', { class: 'demo-buttons' },
-          h('button', { onclick: boot, disabled: busy }, state.status === 'idle' ? 'boot host' : 'reboot host'),
-          h('button', { onclick: runHello, disabled: !ready || busy }, 'run hello-x86_64.elf'),
-          h('button', { onclick: () => runBusybox(['echo','hello','from','busybox']), disabled: !ready || busy }, 'busybox echo'),
-          h('button', { onclick: () => runBusybox(['uname','-a']), disabled: !ready || busy }, 'busybox uname -a'),
-          h('button', { onclick: () => runBusybox(['expr','7','*','6']), disabled: !ready || busy }, 'busybox expr 7 * 6'),
-          h('button', { onclick: takeSnapshot, disabled: !ready || busy }, 'snapshot memory'),
-        ),
-        h('div', { class: 'demo-grid' },
-          h('div', null,
-            h('div', { class: 'demo-status' }, `exit: ${state.lastExit ?? '—'}    mem snapshot: ${state.memBytes ? state.memBytes.toLocaleString() + ' bytes' : '—'}`),
-            h('div', { class: 'demo-out', id: 'demo-stdout' }, state.stdout || '(no stdout yet — boot the host to see hi)'),
-            state.stderr ? h('div', { class: 'demo-out', style: 'margin-top:0.5rem;color:#fda4af' }, 'stderr:\n' + state.stderr) : null,
+      const busy  = state.status === 'booting' || state.status === 'running';
+      const memTag = state.memBytes ? state.memBytes.toLocaleString() + ' bytes' : '—';
+      return C.Panel({
+        title: 'live witness',
+        style: 'margin:8px',
+        children: h('div', { class: 'wb-pad', id: 'demo-runner' },
+          h('div', { class: 'wb-row' },
+            h('b', null, 'state'), pill(),
+            h('span', null, 'last:'), h('code', null, state.lastCmd || '—'),
+            h('span', null, 'exit:'), h('code', null, state.lastExit ?? '—'),
+            h('span', null, 'mem:'), h('code', null, memTag)
           ),
-          h('div', null,
-            h('div', { class: 'demo-status' }, 'registers (hex)'),
-            regGrid(),
-            h('div', { class: 'demo-status', style: 'margin-top:0.75rem' }, 'log'),
-            h('div', { class: 'demo-out' }, state.log.slice(-12).join('\n') || '(idle)')
+          h('div', { class: 'wb-buttons' },
+            btn(state.status === 'idle' ? 'boot host' : 'reboot host', boot, busy),
+            btn('hello',           runHello,     !ready || busy),
+            btn('echo',            runEcho,      !ready || busy),
+            btn('uname -a',        runUname,     !ready || busy),
+            btn('expr 7 * 6',      runExpr,      !ready || busy),
+            btn('sse2-test',       runSse2,      !ready || busy),
+            btn('snapshot memory', takeSnapshot, !ready || busy)
+          ),
+          h('div', { class: 'wb-grid' },
+            h('div', null,
+              h('div', { class: 'wb-row' }, h('b', null, 'stdout')),
+              h('div', { class: 'wb-out', id: 'demo-stdout' }, state.stdout || '(boot the host to see hi)'),
+              state.stderr ? h('div', { class: 'wb-out', style:'margin-top:6px;color:#c2410c' }, 'stderr:\n' + state.stderr) : null,
+              h('div', { class: 'wb-row', style:'margin-top:8px' }, h('b', null, 'log')),
+              h('div', { class: 'wb-out' }, state.log.slice(-12).join('\n') || '(idle)')
+            ),
+            h('div', null,
+              h('div', { class: 'wb-row' }, h('b', null, 'registers'), h('span', null, '(hex, post-exit)')),
+              regGrid()
+            )
           )
         )
-      );
+      });
+    }
+
+    function heroPanel(){
+      return C.Panel({
+        style:'margin:8px',
+        children: h('div', { class: 'wb-pad' },
+          C.Heading({ level: 1, style: 'margin:0 0 6px 0', children: 'webix' }),
+          C.Lede({ children: 'blink-backed x86_64 linux userspace, in your browser' }),
+          h('p', { style:'margin:8px 0 14px 0;color:var(--panel-text-2);max-width:64ch' },
+            '~280 lines of host code over a 240KB blink wasm that owns the cpu, mmu, ~150 linux x86_64 syscalls, signals, fork/clone, and AF_INET/UNIX/INET6. no js instruction decoder, no js syscall ABI, no js vfs — the wasm runs the metal, the host just feeds elves in and pumps registers out.'),
+          h('div', { style:'display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px 0' },
+            C.Chip({ children:'11/11 tests' }),
+            C.Chip({ children:'node + bun parity' }),
+            C.Chip({ children:'browser witnessed' }),
+            C.Chip({ children:'<200L per file' }),
+            C.Chip({ children:'xstate v5' })
+          ),
+          h('div', { style:'display:flex;gap:8px;flex-wrap:wrap' },
+            C.Btn({ href:'#demo-runner', primary:true, children:'try it live' }),
+            C.Btn({ href:'https://github.com/AnEntrypoint/webix', children:'github' }),
+            C.Btn({ href:'https://www.npmjs.com/package/webix', children:'npm' })
+          )
+        )
+      });
+    }
+
+    function acidPanel(){
+      return C.Panel({
+        style:'margin:8px',
+        children: h('div', { class:'wb-pad', style:'padding:18px 8px 14px' },
+          h('div', { class:'wb-acid' }, 'real ', h('em', null, 'busybox.'), ' real ', h('em', null, 'elf.'), ' in this tab.'),
+          h('div', { class:'wb-tag' }, 'no shims · no fixtures · no js syscall layer · the same window.__debug.x86_64 contract the test suite asserts against.')
+        )
+      });
+    }
+
+    function featuresPanel(){
+      const items = [
+        { name:'blink owns the cpu surface', desc:'~150 linux x86_64 syscalls, signals, fork/clone, mmu, AF_INET/UNIX/INET6 — all in the upstream blink wasm. no parallel js abi.', meta:'host ~280L' },
+        { name:'<200 lines per file',        desc:'every module under the cap. if it grows past 200L it splits before merge. forces composition over sprawl.', meta:'invariant' },
+        { name:'xstate v5 actor lifecycle',  desc:'the hand-rolled xstate-lite is gone. process actors are real xstate machines with witness-able transitions.', meta:'v0.6.0+' },
+        { name:'node + bun first-class',     desc:'bun test.js passes 11/11 alongside node 23.10. file:// dynamic import + emscripten glue + wasm load all work in bun 1.3.8 unmodified.', meta:'parity' },
+        { name:'browser witnessed',          desc:'this page boots the same host the test suite uses. window.__debug.x86_64 is the contract — ready, exitCode, registers, stdout, runElf, snapshot.', meta:'live' },
+        { name:'POSIX NOJIT NOSOCK build',   desc:'sse2 verified. avx traps SIGILL. socket(AF_INET) returns ENOSYS. pthread_create unsupported. all upstream blink build flags — fork emsdk to lift.', meta:'caveat' }
+      ];
+      return C.Panel({
+        title: 'architecture',
+        style: 'margin:8px',
+        children: items.map((it,i)=>C.RowLink({
+          key:'f'+i,
+          code: String(i+1).padStart(2,'0'),
+          title: it.name,
+          sub: it.desc,
+          meta: it.meta,
+          href: '#demo-runner'
+        }))
+      });
+    }
+
+    function examplesPanel(){
+      const items = [
+        { name:'hello-x86_64.elf', desc:'169 byte static elf. exit(42), rax=0x3c, rdi=0x2a — the canonical witness assertion.', meta:'169 B' },
+        { name:'busybox · echo',   desc:'real musl-static busybox running echo. argv goes in, stdout comes out, exit 0.', meta:'1.0 MB' },
+        { name:'busybox · uname -a', desc:'real syscalls fielding utsname. linux 5.x style banner from inside the tab.', meta:'syscall' },
+        { name:'busybox · expr 7 * 6', desc:'multi-arg arithmetic. answer should be 42.', meta:'argv' },
+        { name:'sse2-test.elf',    desc:'verifies sse2 vector ops. avx-test.elf returns 132 on this build by design.', meta:'153 B' },
+        { name:'snapshot memory',  desc:'round-trips 17 MB of linear wasm memory + the register block. byte-exact restore is the suspend/resume primitive.', meta:'17 MB' }
+      ];
+      return C.Panel({
+        title: 'what runs',
+        style: 'margin:8px',
+        children: items.map((it,i)=>C.RowLink({
+          key:'e'+i,
+          title: it.name,
+          sub: it.desc,
+          meta: it.meta,
+          href: '#demo-runner'
+        }))
+      });
+    }
+
+    function quickstartPanel(){
+      return C.Panel({
+        title: 'quick start',
+        style:'margin:8px',
+        children: h('div', { class:'wb-pad' },
+          h('div', { class:'wb-cli' }, h('span',{class:'p'},'#'),'install'),
+          h('div', { class:'wb-cli' }, h('span',{class:'p'},'$'),'npm install webix'),
+          h('div', { class:'wb-cli', style:'margin-top:8px' }, h('span',{class:'p'},'#'),'or run the tests'),
+          h('div', { class:'wb-cli' }, h('span',{class:'p'},'$'),'node test.js'),
+          h('div', { class:'wb-cli' }, h('span',{class:'p'},'$'),'bun test.js')
+        )
+      });
     }
 
     function render(){
+      reveal();
       mount(document.getElementById('app'), () => C.AppShell({
         topbar: C.Topbar({
           brand: 'webix',
           leaf: 'x86_64',
           items: [
             ['demo','#demo-runner'],
+            ['architecture','#architecture'],
             ['github','https://github.com/AnEntrypoint/webix'],
-            ['npm','https://www.npmjs.com/package/webix'],
+            ['npm','https://www.npmjs.com/package/webix']
           ]
         }),
         crumb: C.Crumb({ leaf: 'x86_64 linux userspace, in your browser' }),
-        main: h('main', { style: 'max-width: 980px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem' },
-          C.Hero({
-            heading: 'webix',
-            subheading: 'blink-backed x86_64 linux userspace, in your browser',
-            body: '~280 lines of host code over a 240KB Blink wasm that owns the CPU, MMU, ~150 Linux x86_64 syscalls, signals, fork/clone, and AF_INET/UNIX/INET6. Replaces what most projects in this category hand-roll — no JS instruction decoder, no JS syscall ABI, no JS VFS.',
-            badges: [{ label: '11/11 tests' }, { label: 'node + bun' }, { label: 'browser witnessed' }]
-          }),
-          demoCard(),
-          C.Section({
-            heading: 'how it works',
-            body: 'A single Blink Module instance loads at boot. mountTarBytes layers an Alpine rootfs into MEMFS; mountNodeDir (Node only) exposes any host directory at /host via NODEFS. runElf feeds an ELF in and pumps signals + register state out via a cross-language struct. snapshot/restore round-trips byte-exact wasm memory + registers.'
-          }),
-          C.Section({
-            heading: 'what runs',
-            body: 'real musl-static busybox, real Alpine /bin/busybox + /sbin/apk via dynamic ld-musl, multi-line shell scripts with arithmetic, SSE2 (verified). AVX traps SIGILL · socket(AF_INET) returns ENOSYS · pthread_create unsupported — all upstream Blink build flags (POSIX NOJIT NOSOCK), unblocked by an emscripten rebuild.'
-          }),
-          C.Install({ npm: 'npm install webix' }),
+        main: h('main', { class: 'wb-wrap' },
+          heroPanel(),
+          livePanel(),
+          acidPanel(),
+          featuresPanel(),
+          examplesPanel(),
+          quickstartPanel()
         ),
         status: C.Status({
-          left: ['main', state.status],
+          left:  ['main', state.status],
           right: ['blink', '11/11', state.lastExit !== null ? `exit ${state.lastExit}` : 'idle']
         })
       }));
