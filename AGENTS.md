@@ -94,6 +94,43 @@ hoped; no migrations possible yet. Added two non-obvious caveats below
 box). 0 items migrated this cycle.
 
 
+## Live CLI surface limits (v0.6.3 demo, witnessed 2026-05-04)
+
+The in-page busybox shell at `#cli-panel` runs each command as a single
+`runElf(['./busybox', applet, ...args])` invocation. The actual reachable
+surface, witnessed against the POSIX NOJIT NOSOCK build:
+
+- **argv space-joined upstream.** `blink-core.writeStr(argcPtr, argv.join(' '))`
+  means single-token args only. Quoted args lose grouping at the wasm boundary;
+  `printf 'FB %d\n' 4` becomes `printf FB %d\n 4`.
+- **No pipes.** `pipe()` returns EBADF — `echo hi | wc -c` fails with
+  `can't create pipe: Bad file descriptor`. Disqualifies sh-with-pipelines,
+  loops needing temp files, redirection.
+- **No FS persistence across runElf.** `/tmp/marker` written in run 1 is
+  gone in run 2 even via direct `FS.readFile`. Treat the emscripten FS as
+  ephemeral per call — each runElf is its own fresh boot.
+- **Banner prefix.** stdout always begins with `\n$ ./busybox <argv>\n`
+  before applet output. The CLI strips it.
+- **Working applets witnessed live in the page**: `ls`/`ls -la`, `echo`,
+  `uname -a`, `date`, `id`, `expr`, `printf`, `env`, `cal`, `--list`, bare
+  `busybox` (usage). Failing: anything reading `/proc/*` (proc unmounted),
+  `whoami` (no /etc/passwd), `seq` (signal 132, AVX-ish), pipes/loops/redirects.
+
+## Display residual (v0.6.3)
+
+The display panel paints into a `<canvas>` via two parsers — ANSI tty
+(SGR colors, cursor reset) and an FB pixel protocol (`FB <w> <h>\n<base64
+rgba>\n`). The parsers and a JS-side demo frame are real and witnessed
+(`getImageData` returns a non-uniform gradient). What is **residual**:
+
+- No real X server. Build is NOJIT NOSOCK; no `/dev/fb0`, no mmap surface
+  exposed by blinkenlib, no shared linear memory window for the guest.
+- No guest-driven framebuffer emitter. argv space-joining + missing
+  `pipe()` mean a busybox-shell-only program cannot construct the
+  `FB W H\n<base64>\n` byte stream from inside the wasm. Fixing this
+  requires either (a) a custom static ELF that writes pre-baked pixel
+  data to stdout, or (b) lifting the build flags to enable pipes.
+
 ## Witness host gotchas (v0.6.2)
 
 - **emscripten mprotect noise.** Running musl-static busybox prints

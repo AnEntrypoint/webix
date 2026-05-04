@@ -39,7 +39,15 @@
     .wb-tag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;text-transform:lowercase;opacity:.75;margin:0 8px 24px}
     .wb-cli{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;padding:2px 0}
     .wb-cli .p{color:var(--accent,#16a34a);margin-right:8px}
-  </style>
+    .wb-term{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;background:#1F1B16;color:#FBF6EB;border-radius:8px;padding:10px 12px;height:18rem;overflow:auto;white-space:pre-wrap}
+    .wb-term .p{color:#16a34a}.wb-term .e{color:#f87171}.wb-term .x{color:#9ca3af}
+    .wb-prompt{display:flex;align-items:center;gap:8px;margin-top:8px;font-family:'JetBrains Mono',ui-monospace,monospace}
+    .wb-prompt .ps1{color:var(--accent,#16a34a);font-weight:700}
+    .wb-prompt input{flex:1;background:var(--panel-2,#F1ECE0);border:1px solid var(--panel-border,#d6cfbe);border-radius:6px;padding:7px 10px;font:inherit;font-size:12.5px;color:var(--ink,#1F1B16)}
+    .wb-prompt input:focus{outline:2px solid var(--accent,#16a34a);outline-offset:1px}
+    .wb-canvas{display:block;width:100%;max-width:640px;height:280px;background:#FBF6EB;border-radius:8px;border:1px solid var(--panel-border,#d6cfbe)}
+    .wb-disp-buttons{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+</style>
 </head>
 <body>
   <div id="app">loading…</div>
@@ -47,6 +55,8 @@
   <script type="module">
     import { mount, components as C, h, installStyles } from 'anentrypoint-design';
     import { installWindowDebug } from './assets/x86_64-witness-bootstrap.js';
+    import { createCli } from './assets/cli.js';
+    import { createDisplay } from './assets/display.js';
 
     installStyles();
     document.documentElement.classList.add('ds-247420');
@@ -63,8 +73,70 @@
       stdout: '',
       stderr: '',
       memBytes: null,
-      lastCmd: ''
+      lastCmd: '',
+      term: [],
+      cliBusy: false,
+      cliInput: ''
     };
+
+    let cli = null;
+    let display = null;
+    let canvasRef = null;
+    let inputRef = null;
+
+    function ensureCli(){
+      if (cli) return cli;
+      cli = createCli({
+        onLine: (line) => {
+          state.term.push(line);
+          if (state.term.length > 400) state.term.splice(0, state.term.length - 400);
+          render();
+          // mirror latest stdout into the ANSI display
+          if (line.kind === 'stdout' && display) display.renderAnsi(line.text);
+        },
+        onStatus: (s) => { state.cliBusy = (s === 'running'); render() }
+      });
+      state.term.push({ kind:'x', text: cli.intro() });
+      return cli;
+    }
+
+    function submitCli(){
+      const txt = state.cliInput;
+      state.cliInput = '';
+      ensureCli().submit(txt);
+      render();
+    }
+
+    function cliKey(ev){
+      if (ev.key === 'Enter'){ ev.preventDefault(); submitCli(); return }
+      if (ev.key === 'ArrowUp'){
+        const v = ensureCli().recall('up');
+        if (v !== null){ state.cliInput = v; render() }
+        ev.preventDefault();
+      } else if (ev.key === 'ArrowDown'){
+        const v = ensureCli().recall('down');
+        if (v !== null){ state.cliInput = v; render() }
+        ev.preventDefault();
+      }
+    }
+
+    function ensureDisplay(){
+      if (display || !canvasRef) return display;
+      display = createDisplay(canvasRef);
+      return display;
+    }
+
+    function paintFbDemo(){
+      const d = ensureDisplay(); if (!d) return;
+      d.paintDemo();
+    }
+
+    function paintCalDemo(){
+      const c = ensureCli();
+      c.submit('cal');
+    }
+
+    function clearTerm(){ state.term = []; ensureCli(); render() }
 
     const log = (m) => { state.log.push(`[${new Date().toLocaleTimeString()}] ${m}`); render() };
 
@@ -127,7 +199,13 @@
       render();
     }
 
-    window.__webixDemo = { boot, runHello, runEcho, runUname, runExpr, runSse2, takeSnapshot, state };
+    window.__webixDemo = {
+      boot, runHello, runEcho, runUname, runExpr, runSse2, takeSnapshot, state,
+      get cli(){ return ensureCli() },
+      get display(){ return ensureDisplay() },
+      submitCliText: (t) => { state.cliInput = t; submitCli(); return ensureCli() },
+      paintFbDemo, paintCalDemo, clearTerm
+    };
 
     function pill(){
       const cls = state.status === 'ready' ? '' : (state.status === 'error' ? 'warn' : 'idle');
@@ -268,6 +346,78 @@
       });
     }
 
+    function termPanel(){
+      const ready = state.status === 'ready' || state.status === 'running';
+      const lines = state.term.length ? state.term : [{ kind:'x', text:'(boot the host, then type a command)' }];
+      return C.Panel({
+        title: 'shell',
+        style: 'margin:8px',
+        children: h('div', { class: 'wb-pad', id: 'cli-panel' },
+          h('div', { class: 'wb-row' },
+            h('b', null, 'busybox'),
+            h('span', { class: 'wb-pill ' + (state.cliBusy ? '' : 'idle') }, state.cliBusy ? 'running' : 'idle'),
+            h('span', null, 'history:'), h('code', null, String(cli ? cli.history.length : 0))
+          ),
+          h('div', { class: 'wb-buttons' },
+            btn('ls -la /',     () => window.__webixDemo.submitCliText('ls -la /'),   !ready),
+            btn('uname -a',     () => window.__webixDemo.submitCliText('uname -a'),    !ready),
+            btn('date',         () => window.__webixDemo.submitCliText('date'),        !ready),
+            btn('cal',          () => window.__webixDemo.submitCliText('cal'),         !ready),
+            btn('id',           () => window.__webixDemo.submitCliText('id'),          !ready),
+            btn('expr 7 \\* 6', () => window.__webixDemo.submitCliText('expr 7 * 6'),  !ready),
+            btn('--list',       () => window.__webixDemo.submitCliText('--list'),      !ready),
+            btn('clear',        clearTerm, false)
+          ),
+          h('div', { class: 'wb-term', id: 'cli-term' },
+            ...lines.map((l,i) => h('div', {
+              key: 't'+i,
+              class: l.kind === 'prompt' ? 'p' : (l.kind === 'stderr' ? 'e' : (l.kind === 'exit' ? 'x' : ''))
+            }, l.text))
+          ),
+          h('div', { class: 'wb-prompt' },
+            h('span', { class: 'ps1' }, '$'),
+            h('input', {
+              id: 'cli-input',
+              autocomplete: 'off',
+              spellcheck: 'false',
+              placeholder: ready ? 'type ls / cal / uname -a …' : 'booting host…',
+              disabled: !ready,
+              value: state.cliInput,
+              oninput: (e) => { state.cliInput = e.target.value },
+              onkeydown: cliKey,
+              ref: (el) => { inputRef = el }
+            })
+          )
+        )
+      });
+    }
+
+    function displayPanel(){
+      return C.Panel({
+        title: 'display',
+        style: 'margin:8px',
+        children: h('div', { class: 'wb-pad', id: 'display-panel' },
+          h('div', { class: 'wb-row' },
+            h('b', null, 'canvas'),
+            h('span', null, 'modes:'), h('code', null, 'ansi tty + FB pixel protocol')
+          ),
+          h('div', { class: 'wb-disp-buttons' },
+            btn('paint fb demo',  paintFbDemo,    false),
+            btn('cal -> ansi',    paintCalDemo,   state.status !== 'ready'),
+            btn('clear',          () => { ensureDisplay()?.clear() }, false)
+          ),
+          h('canvas', {
+            id: 'wb-canvas',
+            class: 'wb-canvas',
+            width: 640, height: 280,
+            ref: (el) => { canvasRef = el; ensureDisplay() }
+          }),
+          h('p', { style:'margin:10px 0 0;color:var(--panel-text-2);font-size:12px' },
+            'guest-driven framebuffer is a residual: the POSIX NOJIT NOSOCK build has no /dev/fb0, no mmap surface, and busybox argv space-joining + missing pipe() block any guest emitter of the FB protocol. the parser and demo frame are real; an ELF that paints into it is the gap.')
+        )
+      });
+    }
+
     function quickstartPanel(){
       return C.Panel({
         title: 'quick start',
@@ -290,6 +440,8 @@
           leaf: 'x86_64',
           items: [
             ['demo','#demo-runner'],
+            ['shell','#cli-panel'],
+            ['display','#display-panel'],
             ['architecture','#architecture'],
             ['github','https://github.com/AnEntrypoint/webix'],
             ['npm','https://www.npmjs.com/package/webix']
@@ -299,6 +451,8 @@
         main: h('main', { class: 'wb-wrap' },
           heroPanel(),
           livePanel(),
+          termPanel(),
+          displayPanel(),
           acidPanel(),
           featuresPanel(),
           examplesPanel(),

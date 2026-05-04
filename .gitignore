@@ -26,4 +26,6 @@ node_modules
 .gm
 .xos-test.log
 dist
-docs/assets/
+docs/assets/*
+!docs/assets/cli.js
+!docs/assets/display.js
