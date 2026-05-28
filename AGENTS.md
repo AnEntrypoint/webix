@@ -274,3 +274,43 @@ AF_INET/UNIX/INET6". This contradicted `blink-core.js`
 `capabilities:{nosock:true}` and the NOSOCK build. Corrected to state
 "POSIX NOJIT NOSOCK single-threaded: sse2 only, sockets return ENOSYS".
 Keep marketing copy in sync with `capabilities`.
+
+## Jank-fix pass (v0.6.5, witnessed 2026-05-28)
+
+A page-polish sweep of the gh-pages demo. The fork/clone false claim was
+NOT isolated to the hero — `featuresPanel` item 1 ("blink owns the cpu
+surface") carried the SAME lie (`fork/clone, mmu, AF_INET/UNIX/INET6`).
+**Lesson: marketing copy lives on multiple surfaces** (hero `p`, features
+RowLink desc, examples desc, chips). When you correct a claim, grep the
+whole page for every restatement. README.md and src/*.js were already
+clean; the only remaining tree-wide matches are the vendored
+`blinkenlib.js` and this documented note.
+
+Other jank found + fixed, each browser-witnessed live:
+
+- **Broken nav anchor.** Topbar "architecture" → `#architecture` but no
+  element had that id (`featuresPanel`'s Panel was unwrapped). Wrapped it
+  in `h('div',{id:'architecture'}, C.Panel(...))`. Witness `archExists`
+  false → true.
+- **Stale test count.** Hero chip + features said "11/11"; the suite is
+  now 15/15. Witness `has11:false has15:true`.
+- **REPL polish.** CLI input did not refocus after Enter and the terminal
+  did not auto-scroll. Added `inputRef.focus()` + `scrollTermToBottom()`
+  via `requestAnimationFrame` on submit and on each `onLine`. Witness
+  `repl.refocused:true atBottom:true`.
+- **Canvas aspect squash.** `.wb-canvas` was `width:100%;height:280px`
+  with a 640×280 buffer — squashed on narrow screens. Switched to
+  `aspect-ratio:640/280;height:auto`. Witness mobile canvas 259×113,
+  `canvasAspectOk:true` (was 259×280).
+- **Theme support.** A pre-paint inline script sets `data-theme` from
+  `localStorage` then `prefers-color-scheme`; a dark/light toggle button
+  persists the choice. canvas2d can't read CSS vars, so `display.js`
+  resolves `--panel-2` via `getComputedStyle`.
+- **Loading skeleton.** `<div id=app>loading…</div>` → shimmer skeleton
+  (`.wb-boot`/`.wb-skel`) replaced by `mount` on ready.
+- **Empty-state + token cleanup.** Bare parentheticals unified under a
+  `.wb-empty` class; stderr reds routed through `var(--danger,…)`.
+
+apk add/list still witnessed installing `busybox-static 1.36.1-r31`
+(4 files) after the UX copy changes, via the `window.__debug.x86_64.apk`
+contract.
