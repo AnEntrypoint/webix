@@ -340,3 +340,20 @@ in recall memory too (`mem-*-3`). When editing `docs/index.html`:
 - **Witnessing button clicks needs trusted events** (`page.mouse.click(x,y)`);
   a synthetic `MouseEvent('click')` dispatch does NOT fire SDK-delegated
   handlers, so it falsely reads as a dead button.
+
+## Local SDK + Install gotcha (design pass, v0.6.8, witnessed 2026-05-28)
+
+The page now loads the **local `c:/dev/anentrypoint-design` build**, not
+unpkg. `dist/247420.{js,css}` are vendored + committed into `docs/assets/`
+(un-ignored in `.gitignore`) and the importmap + stylesheet point at
+`./assets/247420.*`. CI cannot reach `c:/dev`, so the dist must be committed;
+`upload-pages-artifact` deploys `docs/` wholesale so no `pages.yml` cp is
+needed. Re-sync = `cp c:/dev/anentrypoint-design/dist/247420.* docs/assets/`
+then commit. `COMPONENT_API.md` in that repo documents the real contracts
+(`Btn variant: primary|ghost|default`, `Hero/Section/Kpi/Install/Manifesto`).
+
+- **`C.Install({cmd,copied,onCopy})` does NOT wire `onCopy` in this build.**
+  It renders `<div class=cli><span class=prompt>$</span><span class=cmd>…
+  </span><span class=copy>copy</span></div>` — the `.copy` is a static span.
+  To make copy work, wrap `Install` in a div with `onclick` that checks
+  `e.target.closest('.copy')` and copies/sets state yourself.
