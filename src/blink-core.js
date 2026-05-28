@@ -69,23 +69,32 @@ function makeRegisterAccessor(Module, clstruct){
 }
 
 export async function createBlinkCore({ wasmBinary, factory, options={} }){
-  let stdoutBuf="", stderrBuf="", lastSignal=null, lastExitCode=null;
+  // byte-buffered stdout/stderr: per-char String concat was O(n^2) for large output.
+  let outBytes=[], errBytes=[], lastSignal=null, lastExitCode=null;
+  const td=new TextDecoder();
+  const decode=(arr)=>td.decode(new Uint8Array(arr));
   let exitDeferred=null;
+  let lastLoaded=null;
+  const preloaded=new Map();
   const stdinQueue=options.stdinBytes?[...options.stdinBytes].reverse():[];
   function settleExit(code){
     lastExitCode=code;
     if(exitDeferred){ const d=exitDeferred; exitDeferred=null; d.resolve(code) }
   }
-  const Module=await factory({
-    noInitialRun:true, wasmBinary,
+  const factoryArgs={
+    noInitialRun:true,
     preRun:(M)=>{
       M.FS.init(
         ()=>stdinQueue.length?stdinQueue.pop():null,
-        (c)=>{ if(c!==null){ stdoutBuf+=String.fromCharCode(c); options.onStdout?.(c) } },
-        (c)=>{ if(c!==null){ stderrBuf+=String.fromCharCode(c); options.onStderr?.(c) } }
+        (c)=>{ if(c!==null){ outBytes.push(c); options.onStdout?.(c) } },
+        (c)=>{ if(c!==null){ errBytes.push(c); options.onStderr?.(c) } }
       );
     }
-  });
+  };
+  // Either supply raw bytes (Node/tests) or an instantiateWasm streaming hook (browser).
+  if(options.instantiateWasm) factoryArgs.instantiateWasm=options.instantiateWasm;
+  else factoryArgs.wasmBinary=wasmBinary;
+  const Module=await factory(factoryArgs);
   const signalCb=Module.addFunction((sig,code)=>{
     if(sig!==SIGTRAP){ lastSignal={sig,code}; settleExit(128+sig); return }
     if(code===BLINK_PREEMPT) Module._blinkenlib_preempt_resume();
@@ -115,21 +124,59 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       FS.mount(FS.filesystems.NODEFS,{root:hostDir},guestDir);
       return guestDir;
     },
-    async runElf(bytes,{ argv=[], progname="/program" }={}){
+    // Mount an IDBFS-backed dir so its contents survive page reloads (browser only).
+    // Call syncPersist() after writes to flush to IndexedDB; loadPersist() once at
+    // boot to populate from IndexedDB. Used to persist apk-installed packages.
+    async persistDir(guestDir="/persist"){
+      const FS=Module.FS;
+      if(!FS.filesystems?.IDBFS) throw new Error("IDBFS not compiled in");
+      mkdirp(FS, guestDir);
+      FS.mount(FS.filesystems.IDBFS,{},guestDir);
+      await new Promise((res,rej)=>FS.syncfs(true,(e)=>e?rej(e):res()));
+      this._persistDir=guestDir;
+      return guestDir;
+    },
+    syncPersist(){
+      const FS=Module.FS;
+      return new Promise((res,rej)=>FS.syncfs(false,(e)=>e?rej(e):res()));
+    },
+    // Cache the bytes that should sit at /program (blink always execs /program).
+    // Reusing the same handle across runElf skips the per-call multi-MB FS write
+    // (busybox is ~1MB). Returns the opaque handle to pass back as runElf opts.path.
+    preloadFile(name, bytes){
+      const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
+      const handle="pre:"+name;
+      preloaded.set(handle, data);
+      return handle;
+    },
+    isPreloaded(handle){ return preloaded.has(handle); },
+    async runElf(bytes,{ argv=[], progname="/program", path }={}){
       if(exitDeferred) throw new Error("blink-core: previous run not yet settled");
       const FS=Module.FS;
-      const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
-      try{ FS.unlink("/program") }catch(_){}
-      const s=FS.open("/program","w+");
-      FS.write(s,data,0,data.length,0); FS.close(s); FS.chmod("/program",0o755);
+      // Resolve the bytes: explicit bytes, or a preloaded handle.
+      let data=bytes;
+      if(!data && path){
+        data=preloaded.get(path);
+        if(!data) throw new Error("blink-core: unknown preload handle "+path);
+      }
+      if(!data) throw new Error("blink-core: runElf needs bytes or a preload handle");
+      const writeKey=path||null;
+      // Skip the FS write if the identical handle is already sitting at /program.
+      if(!(writeKey && lastLoaded===writeKey)){
+        const u8=data instanceof Uint8Array?data:new Uint8Array(data);
+        try{ FS.unlink("/program") }catch(_){}
+        const s=FS.open("/program","w+");
+        FS.write(s,u8,0,u8.length,0); FS.close(s); FS.chmod("/program",0o755);
+        lastLoaded=writeKey;
+      }
       writeStr(prognamePtr,progname,200);
       writeStr(argcPtr, argv.length?argv.join(" "):progname, 200);
       writeStr(argvPtr,"",200);
-      stdoutBuf=""; stderrBuf=""; lastSignal=null; lastExitCode=null;
+      outBytes=[]; errBytes=[]; lastSignal=null; lastExitCode=null;
       const done=new Promise((resolve,reject)=>{ exitDeferred={resolve,reject} });
       Module._blinkenlib_run();
       const exitCode=await done;
-      return { exitCode, stdout:stdoutBuf, stderr:stderrBuf, signal:lastSignal };
+      return { exitCode, stdout:decode(outBytes), stderr:decode(errBytes), signal:lastSignal };
     },
     pushStdin(bytes){ for(const b of [...bytes].reverse()) stdinQueue.unshift(b) },
     async runShellScript(busyboxBytes, scriptText, { argv=[], progname="/program" }={}){
@@ -141,7 +188,7 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
     },
     snapshot(){
       const s=regs.snapshot();
-      return { ...s, exitCode:lastExitCode, stdoutTail:stdoutBuf.slice(-4096), stderrTail:stderrBuf.slice(-4096) };
+      return { ...s, exitCode:lastExitCode, stdoutTail:decode(outBytes).slice(-4096), stderrTail:decode(errBytes).slice(-4096) };
     },
     restore(snap){ regs.restore(snap) },
     readRegisters(){ return regs.readRegisters() }

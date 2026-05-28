@@ -42,6 +42,36 @@ export function createCli({ onLine, onStatus }){
   let histIdx = -1;
   let pending = '';
 
+  async function execApk(x, tokens){
+    if (!x.apk) return { stdout:'', stderr:'apk unavailable: rootfs not mounted', exitCode:1 };
+    const sub = tokens[0];
+    try {
+      if (sub === 'add'){
+        const out = [];
+        for (const target of tokens.slice(1)){
+          // a URL or a relative asset path to a .apk (tar.gz)
+          const url = /^https?:\/\//.test(target) ? target : (ASSETS + target);
+          const r = await x.apk.addUrl(url);
+          out.push(`(1/1) Installing ${r.name} (${r.version||'?'}) — ${r.files.length} files`);
+        }
+        out.push('OK: ' + x.apk.list().length + ' packages installed');
+        return { stdout: out.join('\n') + '\n', stderr:'', exitCode:0 };
+      }
+      if (sub === 'info'){
+        const i = x.apk.info(tokens[1]);
+        return i ? { stdout:`${tokens[1]}-${i.version}\n${i.files.length} files\n`, stderr:'', exitCode:0 }
+                 : { stdout:'', stderr:`${tokens[1]||''} not installed`, exitCode:1 };
+      }
+      if (sub === 'list' || !sub){
+        const rows = x.apk.list().map(p=>`${p.name}-${p.version} [${p.fileCount} files]`);
+        return { stdout: (rows.join('\n') || '(no packages installed)') + '\n', stderr:'', exitCode:0 };
+      }
+      return { stdout:'', stderr:`apk: unknown subcommand '${sub}' (try add|info|list)`, exitCode:1 };
+    } catch (e){
+      return { stdout:'', stderr:'apk error: '+(e?.message||e), exitCode:1 };
+    }
+  }
+
   async function exec(input){
     const trimmed = input.trim();
     if (!trimmed) return { stdout:'', stderr:'', exitCode:0 };
@@ -49,6 +79,7 @@ export function createCli({ onLine, onStatus }){
     if (!x) return { stdout:'', stderr:'host not ready', exitCode:1 };
 
     const userTokens = tokenize(trimmed);
+    if (userTokens[0] === 'apk') return execApk(x, userTokens.slice(1));
     const argv = ['./busybox', ...userTokens];
     const bytes = await loadBusybox();
 
@@ -90,6 +121,7 @@ export function createCli({ onLine, onStatus }){
     return [
       'webix busybox shell — single-applet per line.',
       'try: ls -la /  ·  uname -a  ·  date  ·  cal  ·  expr 7 \\* 6  ·  id  ·  --list',
+      'alpine: apk list  ·  apk add busybox-static.apk  ·  apk info <pkg>',
       'caveats: no pipes, no /tmp persistence, argv space-joined (quoted args lose grouping).',
       ''
     ].join('\n');

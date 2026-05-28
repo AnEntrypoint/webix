@@ -210,3 +210,67 @@ The vendored `containers/blinkenlib.wasm` is built `POSIX NOJIT NOSOCK`:
 These are upstream-Blink-build concerns, not host work. To unblock,
 use `gh workflow run build-blink.yml` with a different blink_repo
 fork patched for sockets/threads/AVX.
+
+## Alpine apk install (v0.6.4, witnessed 2026-05-28)
+
+The gh-pages demo can install from the Alpine package ecosystem. Because
+the build is NOSOCK (socket ENOSYS), single-threaded, and pipe()=EBADF,
+the **real apk-tools binary cannot fetch over the network or spawn its
+child stages** in-page. apk is therefore implemented JS-side in
+`src/alpine-apk.js`:
+
+- **`createApk(host, {root, fetchImpl})`** returns `{addBytes, addUrl,
+  info, list, isInstalled}`. A `.apk` is a gzip tarball; "add"
+  decompresses it and extracts members into `host.Module.FS` (the same
+  mounted alpine minirootfs), then records the package in
+  `/lib/apk/db/installed`. No guest fork/pipe/socket needed.
+- **Real apk v2 files are CONCATENATED gzip members** (`[signature?]`
+  `[control.tar.gz][data.tar.gz]`). Chrome's `DecompressionStream("gzip")`
+  errors "Failed to fetch" on the trailing member instead of continuing.
+  `gunzip()` in alpine-apk.js handles this: try the whole buffer as one
+  stream, and on failure walk gzip-magic (`1f 8b 08`) member starts,
+  inflate each separately, concat outputs. Node's `zlib.gunzipSync`
+  handles concatenation natively; the browser path needs the member walk.
+- **Witnessed live**: `apk add busybox-static.apk` on the demo page
+  installs `busybox-static 1.36.1-r31`, extracts `bin/busybox.static`
+  into the rootfs, and `apk list` shows it. The CLI intercepts `apk`
+  tokens in `cli.js` `execApk` BEFORE the busybox argv-join path, so apk
+  subcommands never cross the wasm argv boundary (immune to space-join).
+- `installWindowDebug({rootfsUrl})` mounts the rootfs and exposes
+  `window.__debug.x86_64.apk`. Without `rootfsUrl`, `apk` is null and the
+  CLI reports "apk unavailable: rootfs not mounted".
+
+## Browser performance (v0.6.4)
+
+- **Streaming compile + Cache API.** `x86_64-blink-browser.js` now passes
+  an emscripten `instantiateWasm` hook that uses
+  `WebAssembly.instantiateStreaming` when the wasm Response is
+  `application/wasm`, with an arrayBuffer fallback. The wasm Response is
+  cached in `caches.open("webix-wasm-v1")` so repeat visits skip the
+  network. Test/Node path still passes raw `wasmBinary`.
+- **Byte-buffered stdout/stderr.** `blink-core.js` collects output bytes
+  into arrays and `TextDecoder`-decodes once at run end, replacing the
+  per-char `String.fromCharCode` concat that was O(n^2) for large output.
+- **preloadFile / handle reuse.** `host.preloadFile(name, bytes)` caches
+  ELF bytes by handle; `runElf(null, {path:handle})` skips the per-call
+  FS write when `lastLoaded===handle`. blink always execs `/program`, so
+  the handle controls what bytes sit there, not an arbitrary exec path.
+
+## FS persistence correction (supersedes the "No FS persistence" note above)
+
+The "No FS persistence across runElf" bullet in the Live CLI section
+describes the *busybox CLI's* fresh-write-per-invocation pattern, NOT the
+host. The blink host is a **singleton** (`installWindowDebug` creates it
+once; `runElf` reuses it), so the emscripten FS **does persist across
+runElf calls within a page session**. This is why JS-driven apk install
+works: extracted files survive into later runs. Cross-reload persistence
+still needs an explicit IDBFS mount (`-lidbfs.js` is compiled in but no
+`FS.mount`/`syncfs` is wired yet).
+
+## Hero text correction (v0.6.4)
+
+The old `docs/index.html` hero claimed the wasm owns "fork/clone, and
+AF_INET/UNIX/INET6". This contradicted `blink-core.js`
+`capabilities:{nosock:true}` and the NOSOCK build. Corrected to state
+"POSIX NOJIT NOSOCK single-threaded: sse2 only, sockets return ENOSYS".
+Keep marketing copy in sync with `capabilities`.

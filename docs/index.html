@@ -152,6 +152,7 @@
           wasmUrl: ASSETS + 'blinkenlib.wasm',
           glueUrl: ASSETS + 'blinkenlib.js',
           elfUrl:  ASSETS + 'hello-x86_64.elf',
+          rootfsUrl: ASSETS + 'alpine-minirootfs-x86_64.tar.gz',
           argv: ['hello'],
           onLog: log
         });
@@ -274,7 +275,7 @@
           C.Heading({ level: 1, style: 'margin:0 0 6px 0', children: 'webix' }),
           C.Lede({ children: 'blink-backed x86_64 linux userspace, in your browser' }),
           h('p', { style:'margin:8px 0 14px 0;color:var(--panel-text-2);max-width:64ch' },
-            '~280 lines of host code over a 240KB blink wasm that owns the cpu, mmu, ~150 linux x86_64 syscalls, signals, fork/clone, and AF_INET/UNIX/INET6. no js instruction decoder, no js syscall ABI, no js vfs — the wasm runs the metal, the host just feeds elves in and pumps registers out.'),
+            '~280 lines of host code over a 240KB blink wasm that owns the cpu, mmu, ~150 linux x86_64 syscalls, and signals. this build is POSIX NOJIT NOSOCK single-threaded: sse2 only, sockets return ENOSYS. no js instruction decoder, no js syscall ABI, no js vfs — the wasm runs the metal, the host just feeds elves in and pumps registers out. install from the alpine ecosystem with js-driven apk.'),
           h('div', { style:'display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px 0' },
             C.Chip({ children:'11/11 tests' }),
             C.Chip({ children:'node + bun parity' }),
@@ -366,6 +367,8 @@
             btn('id',           () => window.__webixDemo.submitCliText('id'),          !ready),
             btn('expr 7 \\* 6', () => window.__webixDemo.submitCliText('expr 7 * 6'),  !ready),
             btn('--list',       () => window.__webixDemo.submitCliText('--list'),      !ready),
+            btn('apk list',     () => window.__webixDemo.submitCliText('apk list'),    !ready),
+            btn('apk add',      () => window.__webixDemo.submitCliText('apk add busybox-static.apk'), !ready),
             btn('clear',        clearTerm, false)
           ),
           h('div', { class: 'wb-term', id: 'cli-term' },

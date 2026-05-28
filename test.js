@@ -6,6 +6,34 @@ import { parseELF64 } from "./src/elf.js";
 import { architectures, x86_64, i386 } from "./src/arch.js";
 import { createBlinkHost } from "./src/x86_64-blink.js";
 import { createKernel } from "./src/kernel.js";
+import { createApk } from "./src/alpine-apk.js";
+
+// Build a minimal gzipped .apk (tar.gz) in-memory: a .PKGINFO member + one file.
+function tarHeader(name, size, type="0", mode=0o644){
+  const b=Buffer.alloc(512);
+  b.write(name.slice(0,100), 0);
+  b.write((mode & 0o7777).toString(8).padStart(7,"0")+"\0", 100);
+  b.write("0000000\0", 108); b.write("0000000\0", 116);
+  b.write(size.toString(8).padStart(11,"0")+"\0", 124);
+  b.write("00000000000\0", 136);
+  b.write(type, 156);
+  b.write("        ", 148); // checksum field as spaces before computing
+  let sum=0; for(let i=0;i<512;i++) sum+=b[i];
+  b.write(sum.toString(8).padStart(6,"0")+"\0 ", 148);
+  return b;
+}
+function makeApk(pkgname, pkgver, files){
+  const parts=[];
+  const pkginfo=`pkgname = ${pkgname}\npkgver = ${pkgver}\n`;
+  parts.push(tarHeader(".PKGINFO", Buffer.byteLength(pkginfo)), padBlock(Buffer.from(pkginfo)));
+  for(const [name,content] of files){
+    const buf=Buffer.from(content);
+    parts.push(tarHeader(name, buf.length), padBlock(buf));
+  }
+  parts.push(Buffer.alloc(1024)); // two zero blocks = end of archive
+  return zlib.gzipSync(Buffer.concat(parts));
+}
+function padBlock(buf){ const pad=(512-(buf.length%512))%512; return Buffer.concat([buf, Buffer.alloc(pad)]); }
 
 const tmo = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("timeout " + ms)), ms));
 const race = (p, ms) => Promise.race([p, tmo(ms)]);
@@ -134,6 +162,60 @@ await t("NOSOCK confirmed: socket(AF_INET) returns ENOSYS", async () => {
   const host=await alpineHost();
   const r=await race(host.runElf(guestBytes(host,"/bin/busybox"), { argv:["nc", "-z", "127.0.0.1", "80"] }), 12000);
   assert.match(r.stderr, /Function not implemented/);
+});
+
+await t("preloadFile: write ELF once, rerun via handle without re-supplying bytes", async () => {
+  const host=await createBlinkHost({});
+  const handle=host.preloadFile("hello", HELLO);
+  assert.equal(host.isPreloaded(handle), true);
+  const r1=await race(host.runElf(null, { argv:["hello"], path:handle }), 10000);
+  assert.equal(r1.exitCode, 42);
+  assert.match(r1.stdout, /hi/);
+  // second run reuses the preloaded handle (no FS rewrite), still correct
+  const r2=await race(host.runElf(null, { argv:["hello"], path:handle }), 10000);
+  assert.equal(r2.exitCode, 42);
+  assert.match(r2.stdout, /hi/);
+});
+
+await t("createApk: JS-driven apk add extracts package into rootfs + records db", async () => {
+  const host=await alpineHost();
+  const apk=createApk(host);
+  const pkg=makeApk("hello-pkg", "1.2.3", [["usr/share/hello/msg.txt", "from the alpine ecosystem\n"]]);
+  const res=await apk.addBytes(pkg);
+  assert.equal(res.name, "hello-pkg");
+  assert.equal(res.version, "1.2.3");
+  assert.equal(apk.isInstalled("hello-pkg"), true);
+  // file landed in the guest FS
+  const content=Buffer.from(host.Module.FS.readFile("/usr/share/hello/msg.txt")).toString();
+  assert.match(content, /from the alpine ecosystem/);
+  // installed db updated
+  const db=Buffer.from(host.Module.FS.readFile("/lib/apk/db/installed")).toString();
+  assert.match(db, /P:hello-pkg/);
+  assert.match(db, /V:1.2.3/);
+  // installed executable is runnable end-to-end via busybox cat
+  const r=await race(host.runElf(guestBytes(host,"/bin/busybox"), { argv:["cat", "/usr/share/hello/msg.txt"] }), 15000);
+  assert.equal(r.exitCode, 0);
+  assert.match(r.stdout, /from the alpine ecosystem/);
+});
+
+await t("createApk: real multi-member busybox-static.apk extracts data tarball", async () => {
+  const host=await alpineHost();
+  const apk=createApk(host);
+  const real=blob("containers/busybox-static.apk"); // apk v2: concatenated gzip members
+  const res=await apk.addBytes(real);
+  assert.ok(res.files.length > 0, "expected extracted files from data.tar.gz");
+  // busybox-static ships /bin/busybox.static (or similar) — at least one bin file
+  assert.ok(res.files.some(f=>/bin\//.test(f)), "expected a bin/ file: "+res.files.slice(0,5));
+});
+
+await t("createApk: info + list reflect installed packages", async () => {
+  const host=await alpineHost();
+  const apk=createApk(host);
+  await apk.addBytes(makeApk("pkg-a", "0.1", [["opt/a", "A"]]));
+  await apk.addBytes(makeApk("pkg-b", "0.2", [["opt/b", "B"]]));
+  assert.equal(apk.info("pkg-a").version, "0.1");
+  assert.equal(apk.list().length, 2);
+  assert.equal(apk.list().find(p=>p.name==="pkg-b").version, "0.2");
 });
 
 console.log(`\nresult: ${pass} pass, ${fail} fail`);
