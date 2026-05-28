@@ -31,5 +31,7 @@ docs/assets/*
 !docs/assets/display.js
 !docs/assets/247420.js
 !docs/assets/247420.css
+!docs/assets/apk/
+!docs/assets/apk/**
 .gm/browser-profile/
 .gm/browser-profile-*/

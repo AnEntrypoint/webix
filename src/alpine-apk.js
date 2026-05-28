@@ -7,113 +7,11 @@
 // extracts its members into the host's emscripten FS rootfs, then records the
 // package in /lib/apk/db/installed. The installed files are then runnable via
 // host.runElf because the FS persists for the lifetime of the host singleton.
+//
+// Alpine mirrors send NO CORS headers, so a static page cannot fetch the real
+// repo. addByName resolves against a same-origin bundled manifest instead.
 
-const td=new TextDecoder();
-
-function concat(arrs){
-  let n=0; for(const a of arrs) n+=a.length;
-  const out=new Uint8Array(n); let p=0;
-  for(const a of arrs){ out.set(a,p); p+=a.length; }
-  return out;
-}
-
-async function inflateOne(u8){
-  const ds=new DecompressionStream("gzip");
-  const stream=new Response(u8).body.pipeThrough(ds);
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-// Decompress a (possibly multi-member) gzip stream. Real apk v2 files are
-// concatenated gzip members ([signature?][control.tar.gz][data.tar.gz]); Chrome's
-// DecompressionStream errors on the trailing member rather than continuing, so we
-// walk candidate member starts (gzip magic 1f 8b 08) and inflate each separately,
-// returning every member's output concatenated (the data/files tarball included).
-async function gunzip(bytes){
-  const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
-  if(typeof DecompressionStream==="undefined"){
-    throw new Error("alpine-apk: DecompressionStream unavailable (need browser or Node >=18)");
-  }
-  // First try the whole buffer as a single stream (works for single-member .apk).
-  try{ return await inflateOne(u8); }catch(_){ /* multi-member: walk below */ }
-  // Find every gzip member start: magic 0x1f 0x8b, method 0x08.
-  const starts=[];
-  for(let i=0;i+2<u8.length;i++){ if(u8[i]===0x1f && u8[i+1]===0x8b && u8[i+2]===0x08) starts.push(i); }
-  const members=[];
-  for(let s=0;s<starts.length;s++){
-    const begin=starts[s];
-    // Try progressively shorter end boundaries (next member start, then EOF).
-    const candidates=[ s+1<starts.length?starts[s+1]:u8.length, u8.length ];
-    for(const end of candidates){
-      try{ members.push(await inflateOne(u8.subarray(begin,end))); break; }catch(_){ /* try next */ }
-    }
-  }
-  if(!members.length) throw new Error("alpine-apk: no decodable gzip member found");
-  return concat(members);
-}
-
-// Parse a POSIX/GNU tar buffer into {name, type, mode, data} records.
-// Handles the GNU long-name ('L') extension apk uses for deep paths.
-function parseTar(u8){
-  const out=[]; let p=0; let pendingLongName=null;
-  while(p+512<=u8.length){
-    const block=u8.subarray(p,p+512);
-    if(block.every(b=>b===0)){ p+=512; continue }
-    let name=td.decode(block.subarray(0,100)).replace(/\0.*/,"");
-    const mode=parseInt(td.decode(block.subarray(100,108)).replace(/[\0\s]/g,"")||"0",8)||0o644;
-    const size=parseInt(td.decode(block.subarray(124,136)).replace(/[\0\s]/g,"")||"0",8)||0;
-    const type=String.fromCharCode(block[156]||0x30);
-    const prefix=td.decode(block.subarray(345,500)).replace(/\0.*/,"");
-    if(prefix) name=prefix+"/"+name;
-    const data=u8.subarray(p+512,p+512+size);
-    p+=512+Math.ceil(size/512)*512;
-    if(type==="L"){ pendingLongName=td.decode(data).replace(/\0.*/,""); continue }
-    if(pendingLongName){ name=pendingLongName; pendingLongName=null; }
-    out.push({ name:name.replace(/^\.\//,""), type, mode, data, linkname:td.decode(block.subarray(157,257)).replace(/\0.*/,"") });
-  }
-  return out;
-}
-
-function mkdirp(FS,path){
-  let cur="";
-  for(const seg of path.split("/").filter(Boolean)){
-    cur+="/"+seg;
-    try{ FS.mkdir(cur,0o755) }catch(_){}
-  }
-}
-
-// Write one tar record into the FS rooted at `root`. Skips apk metadata members
-// (.PKGINFO, .SIGN.*, .pre-install, etc.) — they describe the package, not files.
-function writeRecord(FS, root, rec){
-  if(rec.name.startsWith(".")) return false;
-  const full=(root+"/"+rec.name).replace(/\/+/g,"/");
-  if(rec.type==="5"){ mkdirp(FS, full); return true }
-  mkdirp(FS, full.replace(/\/[^/]*$/,""));
-  if(rec.type==="2"||rec.type==="1"){
-    try{ FS.unlink(full) }catch(_){}
-    try{ FS.symlink(rec.linkname, full) }catch(_){}
-    return true;
-  }
-  if(rec.type==="0"||rec.type===""||rec.type===" "){
-    try{ FS.unlink(full) }catch(_){}
-    const s=FS.open(full,"w+");
-    if(rec.data.length) FS.write(s, rec.data, 0, rec.data.length, 0);
-    FS.close(s); FS.chmod(full, rec.mode||0o644);
-    return true;
-  }
-  return false;
-}
-
-function readPkgInfo(records){
-  const info=records.find(r=>r.name===".PKGINFO");
-  const meta={ name:null, version:null };
-  if(info){
-    for(const line of td.decode(info.data).split("\n")){
-      const m=line.match(/^(\w[\w-]*)\s*=\s*(.+)$/);
-      if(m){ if(m[1]==="pkgname") meta.name=m[2].trim(); if(m[1]==="pkgver") meta.version=m[2].trim(); }
-    }
-  }
-  return meta;
-}
+import { gunzip, parseTar, mkdirp, writeRecord, readPkgInfo } from "./apk-format.js";
 
 // Create an apk surface over a blink host. `root` is the guest rootfs prefix
 // (default "/") into which packages extract; the alpine minirootfs is expected
@@ -156,9 +54,67 @@ export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"
     return addBytes(new Uint8Array(await res.arrayBuffer()));
   }
 
+  // Same-origin bundled repo: a curated set of .apk files + a manifest vendored
+  // alongside the page (Alpine mirrors have no CORS). Manifest entries map name
+  // (and `provides` tokens like cmd:nano / so:libfoo.so.6) -> {version, file,
+  // provides, depends}.
+  let manifestPromise=null;
+  function loadManifest(manifestUrl){
+    if(manifestPromise) return manifestPromise;
+    if(!fetchImpl) return Promise.reject(new Error("alpine-apk: no fetch available"));
+    manifestPromise=fetchImpl(manifestUrl).then(r=>{
+      if(!r.ok) throw new Error("apk repo manifest "+manifestUrl+" -> "+r.status);
+      return r.json();
+    }).then(m=>{
+      const pkgs=m.packages||{};
+      const byProvide=new Map();
+      for(const [name,p] of Object.entries(pkgs)){
+        for(const tok of (p.provides||[])) byProvide.set(tok, name);
+      }
+      return { pkgs, byProvide };
+    });
+    return manifestPromise;
+  }
+
+  function resolveName(M, token){
+    if(M.pkgs[token]) return token;
+    if(M.byProvide.has(token)) return M.byProvide.get(token);
+    return null;
+  }
+
+  // Install a name (or provide-token) and its depends from the bundled repo.
+  // so:/cmd:/pc: depends not in the manifest are assumed satisfied by the base
+  // mounted rootfs and skipped; other unresolvable depends are an error.
+  async function addByName(name, { manifestUrl="apk/manifest.json", baseUrl="", _seen=new Set() }={}){
+    const M=await loadManifest(baseUrl+manifestUrl);
+    const pkgName=resolveName(M, name);
+    if(!pkgName){
+      const available=Object.keys(M.pkgs).join(", ");
+      throw new Error(`'${name}' not in the bundled repo. network apk needs a CORS-enabled mirror (Alpine mirrors send none). available: ${available}`);
+    }
+    if(installed.has(pkgName)){
+      const p=installed.get(pkgName);
+      return { name:pkgName, version:p.version, files:p.files, alreadyInstalled:true };
+    }
+    if(_seen.has(pkgName)) return null; // cycle guard
+    _seen.add(pkgName);
+    const p=M.pkgs[pkgName];
+    for(const dep of (p.depends||[])){
+      const depPkg=resolveName(M, dep);
+      if(depPkg && installed.has(depPkg)) continue;
+      if(!depPkg){
+        if(/^(so|cmd|pc):/.test(dep)) continue; // assumed in base rootfs
+        throw new Error(`'${pkgName}' needs '${dep}' which is not in the bundled repo`);
+      }
+      await addByName(depPkg, { manifestUrl, baseUrl, _seen });
+    }
+    return addUrl(baseUrl+p.file);
+  }
+
   return {
     addBytes,
     addUrl,
+    addByName,
     info(name){ return installed.get(name)||null; },
     list(){ return [...installed.entries()].map(([name,p])=>({ name, version:p.version, fileCount:(p.files||[]).length })); },
     isInstalled(name){ return installed.has(name); }

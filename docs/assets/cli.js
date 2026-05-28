@@ -47,12 +47,22 @@ export function createCli({ onLine, onStatus }){
     const sub = tokens[0];
     try {
       if (sub === 'add'){
+        const targets = tokens.slice(1);
+        if (!targets.length) return { stdout:'', stderr:'apk add: missing package name', exitCode:1 };
         const out = [];
-        for (const target of tokens.slice(1)){
-          // a URL or a relative asset path to a .apk (tar.gz)
-          const url = /^https?:\/\//.test(target) ? target : (ASSETS + target);
-          const r = await x.apk.addUrl(url);
-          out.push(`(1/1) Installing ${r.name} (${r.version||'?'}) — ${r.files.length} files`);
+        for (const target of targets){
+          let r;
+          if (/^https?:\/\//.test(target) || /\.apk$/.test(target)){
+            // explicit URL or a .apk filename -> fetch that file directly
+            const url = /^https?:\/\//.test(target) ? target : (ASSETS + target);
+            r = await x.apk.addUrl(url);
+          } else {
+            // a bare package name -> resolve against the same-origin bundled repo
+            r = await x.apk.addByName(target, { baseUrl: ASSETS });
+          }
+          out.push(r.alreadyInstalled
+            ? `${r.name} (${r.version||'?'}) is already installed`
+            : `Installing ${r.name} (${r.version||'?'}) — ${r.files.length} files`);
         }
         out.push('OK: ' + x.apk.list().length + ' packages installed');
         return { stdout: out.join('\n') + '\n', stderr:'', exitCode:0 };
@@ -121,7 +131,7 @@ export function createCli({ onLine, onStatus }){
     return [
       'webix busybox shell — single-applet per line.',
       'try: ls -la /  ·  uname -a  ·  date  ·  cal  ·  expr 7 \\* 6  ·  id  ·  --list',
-      'alpine: apk list  ·  apk add busybox-static.apk  ·  apk info <pkg>',
+      'alpine: apk add nano  ·  apk list  ·  apk info <pkg>  (bundled same-origin repo)',
       'caveats: no pipes, no /tmp persistence, argv space-joined (quoted args lose grouping).',
       ''
     ].join('\n');
