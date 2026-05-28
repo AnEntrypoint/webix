@@ -9,6 +9,12 @@ function ensureWebEnv(){
     globalThis.document={ currentScript:{src:"file:///"}, createElement:()=>({}), getElementsByTagName:()=>[] };
     if(typeof importScripts==="undefined") globalThis.importScripts=()=>{ throw new Error("importScripts unavailable") };
   }
+  // The threaded (-pthread) emscripten glue references the worker-scope global
+  // `self` at module-eval time; on Node's main thread that is undefined. Shim
+  // it so the threaded blinkenlib loads under plain `node` (test.js, CI) without
+  // each caller needing its own shim. The pthread pool spawns real
+  // worker_threads which set their own scope.
+  if(typeof globalThis.self==="undefined") globalThis.self=globalThis;
 }
 
 export async function createBlinkHost(options={}){
