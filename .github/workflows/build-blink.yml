@@ -80,6 +80,45 @@ jobs:
             LDFLAGS="$EFLAGS" \
             CPPFLAGS="-DHTML -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_GNU_SOURCE -pthread"
 
+      - name: Force feature defines (emconfigure probes cannot run wasm natively)
+        working-directory: libblink
+        run: |
+          # Blink's ./configure detects every feature by compile+RUN of a probe
+          # binary (configure config(): `compile && run o/tool/config/X`). Under
+          # emconfigure the probe compiles to wasm which cannot execute on the
+          # x86 runner, so EVERY probe reports "no" and the wanted HAVE_* stay
+          # commented. Worse, the failed pthread probe (configure:508-511) runs
+          # `uncomment '#define DISABLE_THREADS'`, force-disabling threads even
+          # though we passed --enable-threads. We therefore patch the generated
+          # config.h directly with the defines we KNOW hold for the emscripten
+          # (musl) target. This is the deterministic "force the defines" path.
+          CFG=config.h
+          echo "== config.h before patch =="
+          grep -nE 'DISABLE_THREADS|DISABLE_SOCKETS|DISABLE_NONPOSIX|HAVE_FORK|HAVE_PIPE2|HAVE_DUP3|HAVE_MAP_SHARED|HAVE_SCHED_YIELD' "$CFG" || true
+          # Enable threads: ensure DISABLE_THREADS stays commented (re-comment if
+          # the probe uncommented it). The leading regex tolerates 0+ spaces.
+          sed -i 's@^#define DISABLE_THREADS@// #define DISABLE_THREADS@' "$CFG"
+          # --disable-all left these as plain (uncommented) #define lines; the
+          # --enable-* flags comment them at configure time, but be defensive.
+          sed -i 's@^#define DISABLE_SOCKETS@// #define DISABLE_SOCKETS@' "$CFG"
+          sed -i 's@^#define DISABLE_NONPOSIX@// #define DISABLE_NONPOSIX@' "$CFG"
+          # Uncomment the HAVE_* that emscripten's musl libc genuinely provides.
+          # (NOT HAVE_FORK: emscripten has no real fork(); leaving it off keeps
+          # Blink on its no-fork path. NOT process-shared pthread mutexes.)
+          for SYM in HAVE_PIPE2 HAVE_DUP3 HAVE_MAP_SHARED HAVE_MAP_ANONYMOUS \
+                     HAVE_SCHED_YIELD HAVE_SCHED_H HAVE_GETENTROPY HAVE_CLOCK_SETTIME \
+                     HAVE_STRCHRNUL HAVE_MEMCCPY HAVE_REALPATH HAVE_SEEKDIR \
+                     HAVE_PREADV HAVE_VASPRINTF HAVE_WCWIDTH HAVE_FDATASYNC \
+                     HAVE_SYNC HAVE_SYSINFO HAVE_GETRANDOM HAVE_STRUCT_TIMEZONE; do
+            sed -i "s@^// #define $SYM\$@#define $SYM@" "$CFG"
+          done
+          echo "== config.h after patch =="
+          grep -nE 'DISABLE_THREADS|DISABLE_SOCKETS|DISABLE_NONPOSIX|HAVE_FORK|HAVE_PIPE2|HAVE_DUP3|HAVE_MAP_SHARED|HAVE_SCHED_YIELD|HAVE_GETENTROPY' "$CFG" || true
+          # Hard gate: threads MUST be enabled or the whole max-perf premise fails.
+          if grep -qE '^#define DISABLE_THREADS' "$CFG"; then
+            echo "FATAL: DISABLE_THREADS still active after patch"; exit 1
+          fi
+
       - name: Compile (emmake make blinkenlib)
         working-directory: libblink
         run: |

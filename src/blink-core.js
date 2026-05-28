@@ -95,6 +95,21 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   if(options.instantiateWasm) factoryArgs.instantiateWasm=options.instantiateWasm;
   else factoryArgs.wasmBinary=wasmBinary;
   const Module=await factory(factoryArgs);
+  // Under -pthread the MODULARIZE factory can resolve before wasmExports is
+  // assigned (the pthread worker pool bootstraps asynchronously after the main
+  // module instantiates). Everything below touches Module.wasmExports.memory
+  // synchronously, so wait for it to appear. Older single-thread glue exposes
+  // it as Module.asm; normalize that here so the rest of the file is uniform.
+  if(!Module.wasmExports && Module.asm) Module.wasmExports=Module.asm;
+  if(!Module.wasmExports){
+    if(typeof Module.ready?.then==="function"){ try{ await Module.ready }catch(_){} }
+    for(let i=0;i<2000 && !(Module.wasmExports||(Module.wasmExports=Module.asm));i++){
+      await new Promise(r=>setTimeout(r,0));
+    }
+  }
+  if(!Module.wasmExports?.memory){
+    throw new Error("blink-core: wasmExports.memory unavailable after init (threaded glue did not finish bootstrapping)");
+  }
   const signalCb=Module.addFunction((sig,code)=>{
     if(sig!==SIGTRAP){ lastSignal={sig,code}; settleExit(128+sig); return }
     if(code===BLINK_PREEMPT) Module._blinkenlib_preempt_resume();
