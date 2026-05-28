@@ -146,6 +146,15 @@ jobs:
           cp "$JS"   containers/blinkenlib.js
           sha1sum containers/blinkenlib.wasm containers/blinkenlib.js
 
+      - name: Build guest fbtest ELF (static x86_64)
+        run: |
+          # The runner is native x86_64 Linux, so its own gcc emits exactly the
+          # ELF Blink executes. Static + freestanding (-nostdlib, our own _start)
+          # so there is no libc/loader dependency inside the guest.
+          gcc -static -nostdlib -O2 -fno-stack-protector -o containers/fbtest.elf containers/fbtest.c
+          file containers/fbtest.elf || true
+          ls -la containers/fbtest.elf
+
       - name: Smoke test (node, hand-built ELF)
         run: |
           node --experimental-vm-modules --no-warnings <<'EOF'
@@ -164,6 +173,44 @@ jobs:
           console.log("smoke ok exit=42 stdout=", JSON.stringify(r.stdout));
           EOF
 
+      - name: Framebuffer pipeline smoke (guest gradient -> spy_address)
+        run: |
+          # PROVE-FIRST: run the guest fbtest, then read the framebuffer the guest
+          # registered via syscall 0x5fb back through the host getters + the
+          # zero-copy spy_address view, and assert the pixels are the expected
+          # non-uniform gradient. This is the end-to-end display proof minus the
+          # canvas (which the browser witness covers).
+          node --experimental-vm-modules --no-warnings <<'EOF'
+          globalThis.self ??= globalThis;
+          const { createBlinkHost } = await import("./src/x86_64-blink.js");
+          const fs = await import("node:fs");
+          const host = await createBlinkHost({});
+          const elf = fs.readFileSync("containers/fbtest.elf");
+          const r = await host.runElf(elf, { argv: ["fbtest"], progname: "/program" });
+          if (r.exitCode !== 42) { console.error("fb smoke: bad exit", r); process.exit(1); }
+          const info = host.fbInfo();
+          if (!info || info.width !== 320 || info.height !== 240) {
+            console.error("fb smoke: geometry wrong", info); process.exit(1);
+          }
+          const view = host.fbView();
+          if (!view || !view.pixels) { console.error("fb smoke: no fbView"); process.exit(1); }
+          // Assert the gradient: pixel (0,0) = R0 G0 B0 A255; (1,0) = R1 G0 B1 A255.
+          const px = view.pixels;
+          const p00 = [px[0], px[1], px[2], px[3]];
+          const p10 = [px[4], px[5], px[6], px[7]];
+          const okGradient = p00[3] === 255 && p10[0] === 1 && p10[2] === 1 && p10[3] === 255;
+          // Non-uniformity: some pixel differs from (0,0).
+          let nonUniform = false;
+          for (let i = 4; i < Math.min(px.length, 4000); i += 4) {
+            if (px[i] !== p00[0] || px[i+1] !== p00[1] || px[i+2] !== p00[2]) { nonUniform = true; break; }
+          }
+          if (!okGradient || !nonUniform) {
+            console.error("fb smoke: pixels not the expected gradient", { p00, p10, nonUniform });
+            process.exit(1);
+          }
+          console.log("fb smoke ok: 320x240 gradient registered + read zero-copy; generation=", info.generation);
+          EOF
+
       - name: Commit rebuilt artifacts
         env:
           BLINK_REPO: ${{ inputs.blink_repo || 'lanmower/blink' }}
@@ -171,7 +218,7 @@ jobs:
         run: |
           git config user.email "github-actions@users.noreply.github.com"
           git config user.name "github-actions"
-          git add containers/blinkenlib.wasm containers/blinkenlib.js
+          git add containers/blinkenlib.wasm containers/blinkenlib.js containers/fbtest.elf containers/fbtest.c
           if git diff --cached --quiet; then
             echo "no changes"; exit 0
           fi

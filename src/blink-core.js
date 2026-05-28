@@ -38,12 +38,24 @@ function extractTarToFS(FS, tarBytes, onError){
   }
 }
 
+// Return the live WASM linear-memory ArrayBuffer. Under -pthread the memory is
+// IMPORTED + shared (--import-memory --shared-memory), so it is NOT an export:
+// wasmExports.memory is undefined and only Module.wasmMemory / the HEAP views
+// point at it. HEAPU8.buffer is the most portable + always-current handle
+// (emscripten re-points the HEAP* views on every growth), so prefer it; fall
+// back to wasmMemory then the (single-thread-only) wasmExports.memory.
+function memBuffer(Module){
+  const b = Module.HEAPU8?.buffer || Module.wasmMemory?.buffer || Module.wasmExports?.memory?.buffer;
+  if(!b) throw new Error("blink-core: cannot locate WASM memory buffer");
+  return b;
+}
+
 function makeRegisterAccessor(Module, clstruct){
-  const dv=()=>new DataView(Module.wasmExports.memory.buffer);
+  const dv=()=>new DataView(memBuffer(Module));
   const off=(i)=>dv().getUint32(clstruct+i*4,true);
   return {
     snapshot(){
-      const memBuf=Module.wasmExports.memory.buffer;
+      const memBuf=memBuffer(Module);
       const memCopy=new Uint8Array(memBuf.byteLength);
       memCopy.set(new Uint8Array(memBuf));
       const v=dv();
@@ -52,7 +64,7 @@ function makeRegisterAccessor(Module, clstruct){
       return { memory:memCopy, registers:regs };
     },
     restore(snap){
-      const memBuf=Module.wasmExports.memory.buffer;
+      const memBuf=memBuffer(Module);
       if(snap.memory.byteLength>memBuf.byteLength) throw new Error("snapshot memory larger than current");
       new Uint8Array(memBuf).set(snap.memory);
       const v=dv();
@@ -95,21 +107,19 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   if(options.instantiateWasm) factoryArgs.instantiateWasm=options.instantiateWasm;
   else factoryArgs.wasmBinary=wasmBinary;
   const Module=await factory(factoryArgs);
-  // Under -pthread the MODULARIZE factory can resolve before wasmExports is
-  // assigned (the pthread worker pool bootstraps asynchronously after the main
-  // module instantiates). Everything below touches Module.wasmExports.memory
-  // synchronously, so wait for it to appear. Older single-thread glue exposes
-  // it as Module.asm; normalize that here so the rest of the file is uniform.
-  if(!Module.wasmExports && Module.asm) Module.wasmExports=Module.asm;
-  if(!Module.wasmExports){
+  // Under -pthread the memory is imported + shared, so it lives on
+  // Module.wasmMemory / the HEAP views, NOT on wasmExports.memory (which is
+  // undefined for an imported memory). The MODULARIZE factory also resolves
+  // once the main-thread runtime is up; wait until a memory buffer is reachable
+  // through any of the portable handles before touching it.
+  if(!Module.HEAPU8 && !Module.wasmMemory && !Module.wasmExports?.memory){
     if(typeof Module.ready?.then==="function"){ try{ await Module.ready }catch(_){} }
-    for(let i=0;i<2000 && !(Module.wasmExports||(Module.wasmExports=Module.asm));i++){
+    for(let i=0;i<2000 && !(Module.HEAPU8||Module.wasmMemory||Module.wasmExports?.memory);i++){
       await new Promise(r=>setTimeout(r,0));
     }
   }
-  if(!Module.wasmExports?.memory){
-    throw new Error("blink-core: wasmExports.memory unavailable after init (threaded glue did not finish bootstrapping)");
-  }
+  // memBuffer throws a clear error if no handle resolved; probe it once now.
+  memBuffer(Module);
   const signalCb=Module.addFunction((sig,code)=>{
     if(sig!==SIGTRAP){ lastSignal={sig,code}; settleExit(128+sig); return }
     if(code===BLINK_PREEMPT) Module._blinkenlib_preempt_resume();
@@ -123,7 +133,7 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   const prognamePtr=Module._blinkenlib_get_progname_string();
   const regs=makeRegisterAccessor(Module, clstruct);
   function writeStr(ptr,str,max){
-    const view=new DataView(Module.wasmExports.memory.buffer);
+    const view=new DataView(memBuffer(Module));
     const n=Math.min(str.length,max-1);
     for(let i=0;i<n;i++) view.setUint8(ptr+i,str.charCodeAt(i));
     view.setUint8(ptr+n,0);
@@ -134,7 +144,7 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   // every multi-word arg). ARGC_MAX_LINE_LEN is 4096 in the patched build.
   function writeArgv(ptr,args,max){
     const enc=new TextEncoder();
-    const view=new Uint8Array(Module.wasmExports.memory.buffer);
+    const view=new Uint8Array(memBuffer(Module));
     let off=0;
     for(const a of args){
       const bytes=enc.encode(String(a));
@@ -163,7 +173,7 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
     const info=fbInfo(); if(!info) return null;
     const host=Module._blinkenlib_get_fb_ptr(); if(!host) return null;
     const len=info.stride*info.height;
-    return { ...info, pixels:new Uint8ClampedArray(Module.wasmExports.memory.buffer,host,len) };
+    return { ...info, pixels:new Uint8ClampedArray(memBuffer(Module),host,len) };
   }
   return {
     Module, clstruct,
