@@ -193,9 +193,12 @@ fetch`), so the request routes through a CORS-proxy chain in `src/apk-repo.js`:
   (corsproxy.io 403, allorigins 000/522, thingproxy 000, proxy.cors.sh/cors.eu.org/cors.lol/everyorigin 429,
   isomorphic-git/cloudflare-ex 403, wsrv/yacdn/jina/whateverorigin/htmldriven/12ft 404/000/422/301).
 - `corsFetch(url)` tries **direct first** (free when a browser/extension
-  allows it), then `[codetabs, allorigins-raw, corsproxy.io]`; allorigins +
-  corsproxy are best-effort fallbacks for when codetabs blips. On total
-  failure it throws naming every attempt (no silent hang).
+  allows it), then `[codetabs, allorigins-raw, corsproxy.io, wranger]`;
+  allorigins + corsproxy are best-effort fallbacks for when codetabs blips,
+  and `wranger` (`https://wranger.almagestfraternite.workers.dev/?quest=<RAW>`)
+  is our self-hosted Cloudflare Worker absorbing tail traffic when all three
+  public proxies fail. On total failure it throws naming every attempt
+  (no silent hang).
 - `makeRepo()` fetches + gunzips + untars `APKINDEX.tar.gz` from
   `dl-cdn.alpinelinux.org/alpine/v3.21/{main,community}/x86_64`, parses the
   `P/V/D/p` records into `byName`+`byProvide` maps (cached), resolves a name

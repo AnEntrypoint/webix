@@ -9,10 +9,13 @@
 import { gunzip, parseTar } from "./apk-format.js";
 
 // quest takes the RAW url (no encoding); the rest take an encoded url.
+// wranger is our self-hosted Cloudflare Worker (open generic-proxy mode); listed
+// last so it absorbs traffic only when the three public proxies all fail.
 export const DEFAULT_PROXIES=[
   u=>`https://api.codetabs.com/v1/proxy/?quest=${u}`,
   u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u=>`https://corsproxy.io/?url=${encodeURIComponent(u)}`
+  u=>`https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+  u=>`https://wranger.almagestfraternite.workers.dev/?quest=${u}`
 ];
 
 export const DEFAULT_REPOS=[
