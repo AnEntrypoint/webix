@@ -19,14 +19,27 @@
     html:not(.ds-ready) body{visibility:hidden}
     html.ds-ready body{visibility:visible;animation:ds-fade-in .18s ease-out both}
     @keyframes ds-fade-in{from{opacity:0}to{opacity:1}}
-    .wb-wrap{max-width:1040px;margin:0 auto;padding:0 8px 64px}
+    .wb-page{min-height:100vh;display:flex;flex-direction:column}
+    .wb-header{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:12px clamp(16px,4vw,40px);background:color-mix(in oklab,var(--app-bg,#131318) 86%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--panel-border,rgba(255,255,255,.08))}
+    .wb-brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--ink,#F6F5F1);font-family:'Archivo Black','Space Grotesk',sans-serif}
+    .wb-brand-mark{color:var(--accent,#16a34a);font-size:18px;line-height:1}
+    .wb-brand-name{font-size:17px;letter-spacing:.01em}
+    .wb-brand-leaf{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:var(--panel-text-2,#9ca3af);background:var(--panel-2,rgba(255,255,255,.06));padding:2px 8px;border-radius:99px;font-weight:400}
+    .wb-nav{display:flex;gap:2px;flex-wrap:wrap;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px}
+    .wb-nav-link{color:var(--panel-text-2,#9ca3af);text-decoration:none;padding:7px 12px;border-radius:99px;transition:background .15s,color .15s}
+    .wb-nav-link:hover{background:var(--panel-2,rgba(255,255,255,.06));color:var(--ink,#F6F5F1)}
+    .wb-footer{margin-top:auto;display:flex;align-items:center;gap:14px;padding:12px clamp(16px,4vw,40px);border-top:1px solid var(--panel-border,rgba(255,255,255,.08));font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:var(--panel-text-2,#9ca3af)}
+    .wb-foot-accent{color:var(--accent,#16a34a)}
+    .wb-foot-spread{flex:1}
+    .wb-wrap{max-width:1100px;width:100%;margin:0 auto;padding:24px clamp(16px,4vw,40px) 72px}
     .wb-grid{display:grid;gap:8px;grid-template-columns:1fr}
     @media(min-width:920px){.wb-grid{grid-template-columns:1.05fr .95fr}}
     .wb-out{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.5;background:var(--panel-2,#F1ECE0);color:var(--ink,#1F1B16);padding:12px 14px;border-radius:8px;min-height:8.5rem;max-height:22rem;overflow:auto;white-space:pre-wrap}
-    .wb-regs{display:grid;grid-template-columns:repeat(2,1fr);gap:2px 14px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;padding:10px 14px;background:var(--panel-2,#F1ECE0);border-radius:8px}
-    @media(min-width:520px){.wb-regs{grid-template-columns:repeat(4,1fr)}}
-    .wb-regs>span{display:flex;justify-content:space-between;gap:6px}
-    .wb-regs b{color:var(--accent,#16a34a);font-weight:700}
+    .wb-regs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px 18px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;padding:12px 14px;background:var(--panel-2,#F1ECE0);border-radius:8px;font-variant-numeric:tabular-nums}
+    @media(min-width:720px){.wb-regs{grid-template-columns:repeat(4,minmax(0,1fr))}}
+    .wb-regs>span{display:flex;gap:8px;align-items:baseline;justify-content:space-between;min-width:0}
+    .wb-regs b{color:var(--accent,#16a34a);font-weight:700;flex:none}
+    .wb-regs .v{text-align:right;white-space:nowrap}
     .wb-buttons{display:flex;flex-wrap:wrap;gap:6px;padding:0 0 12px 0}
     .wb-row{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;opacity:.85;padding:0 0 8px 0}
     .wb-row b{font-family:'Archivo Black',sans-serif;color:var(--ink,#1F1B16);text-transform:lowercase;letter-spacing:.02em}
@@ -52,15 +65,41 @@
     .wb-skel::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);transform:translateX(-100%);animation:wb-shimmer 1.2s infinite}
     @keyframes wb-shimmer{100%{transform:translateX(100%)}}
     .wb-empty{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--panel-text-2,#6b7280);font-style:italic}
+    .wb-cards{display:grid;grid-template-columns:1fr;gap:10px;padding:14px}
+    @media(min-width:640px){.wb-cards{grid-template-columns:repeat(2,1fr)}}
+    @media(min-width:960px){.wb-cards{grid-template-columns:repeat(3,1fr)}}
+    .wb-card{background:var(--panel-2,rgba(255,255,255,.04));border:1px solid var(--panel-border,rgba(255,255,255,.08));border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;transition:border-color .15s,transform .15s}
+    .wb-card:hover{border-color:var(--accent,#16a34a);transform:translateY(-1px)}
+    .wb-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .wb-card-code{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--accent,#16a34a);font-weight:700}
+    .wb-card-meta{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:var(--panel-text-2,#9ca3af);background:var(--app-bg,rgba(0,0,0,.2));padding:2px 8px;border-radius:99px}
+    .wb-card-title,.wb-card-title-inline{font-family:'Space Grotesk','Archivo Black',sans-serif;font-weight:700;font-size:15px;color:var(--ink,#F6F5F1)}
+    .wb-card-desc{font-size:13px;line-height:1.5;color:var(--panel-text-2,#9ca3af)}
+    .wb-hero{display:grid;grid-template-columns:1fr;gap:28px;align-items:center}
+    @media(min-width:900px){.wb-hero{grid-template-columns:1.15fr .85fr}}
+    .wb-hero-lede{margin:0 0 12px;font-size:clamp(18px,2.4vw,23px);line-height:1.3;color:var(--ink,#F6F5F1);text-wrap:balance;font-family:'Space Grotesk',system-ui,sans-serif;font-weight:600}
+    .wb-hero-body{margin:0 0 10px;color:var(--panel-text-2,#9ca3af);max-width:60ch;font-size:15px;line-height:1.55;text-wrap:pretty}
+    .wb-hero-sub{margin:0 0 16px;color:var(--panel-text-2,#9ca3af);max-width:60ch;font-size:13.5px;line-height:1.5;opacity:.85;text-wrap:pretty}
+    .wb-hero-aside{min-width:0}
+    .wb-term-card{background:#15151b;border:1px solid var(--panel-border,rgba(255,255,255,.1));border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+    .wb-term-bar{display:flex;align-items:center;gap:6px;padding:9px 12px;background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.07)}
+    .wb-dot{width:10px;height:10px;border-radius:50%;background:#3a3a44}
+    .wb-dot:nth-child(1){background:#ff5f57}.wb-dot:nth-child(2){background:#febc2e}.wb-dot:nth-child(3){background:#28c840}
+    .wb-term-name{margin-left:8px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:#9ca3af}
+    .wb-term-code{margin:0;padding:16px 18px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.7;color:#e8e6e1;white-space:pre-wrap;word-break:break-word}
+    .wb-term-code .c-mut{color:#6b7280}
+    .wb-term-code .c-ok{color:#28c840}
   </style>
   <script>
     // theme: respect saved choice, else OS preference. set before paint to avoid flash.
     (function(){
+      var t='dark';
       try{
         var saved=localStorage.getItem('webix-theme');
-        var t=saved||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
-        document.documentElement.setAttribute('data-theme',t);
-      }catch(_){ document.documentElement.setAttribute('data-theme','light') }
+        t = (saved==='dark'||saved==='light') ? saved
+          : (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+      }catch(_){}
+      document.documentElement.setAttribute('data-theme',t);
     })();
   </script>
 </head>
@@ -81,6 +120,21 @@
 
     installStyles();
     document.documentElement.classList.add('ds-247420');
+
+    // The SDK keys its dark palette on [data-theme="dark"|"ink"] and re-applies
+    // its own default ("auto", which matches no rule) on every mount(). We own a
+    // concrete dark/light value and re-assert it after each render so the toggle sticks.
+    let currentTheme = (() => {
+      try {
+        const saved = localStorage.getItem('webix-theme');
+        if (saved === 'dark' || saved === 'light') return saved;
+      } catch(_){}
+      try { return matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light'; } catch(_){}
+      return 'dark';
+    })();
+    const applyTheme = () => document.documentElement.setAttribute('data-theme', currentTheme);
+    applyTheme();
+
     const reveal = () => document.documentElement.classList.add('ds-ready');
     const fallbackReveal = setTimeout(reveal, 1500);
 
@@ -171,10 +225,9 @@
     function clearTerm(){ state.term = []; ensureCli(); render() }
 
     function toggleTheme(){
-      const de = document.documentElement;
-      const next = de.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-      de.setAttribute('data-theme', next);
-      try { localStorage.setItem('webix-theme', next); } catch(_){}
+      currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem('webix-theme', currentTheme); } catch(_){}
+      applyTheme();
       render();
     }
 
@@ -259,13 +312,13 @@
       return h('div', { class: 'wb-regs' },
         ...order.map(k => h('span', null,
           h('b', null, k),
-          h('span', null, '0x' + (state.regs[k] || '0'))
+          h('span', { class: 'v', title: '0x' + (state.regs[k] || '0') }, '0x' + (state.regs[k] || '0'))
         ))
       );
     }
 
-    function btn(label, onclick, disabled){
-      return C.Btn({ onclick, disabled, primary: false, children: label });
+    function btn(label, onClick, disabled){
+      return C.Btn({ onClick, disabled, primary: false, children: label });
     }
 
     function livePanel(){
@@ -315,25 +368,43 @@
     function heroPanel(){
       return C.Panel({
         style:'margin:8px',
-        children: h('div', { class: 'wb-pad' },
-          C.Heading({ level: 1, style: 'margin:0 0 6px 0', children: 'webix' }),
-          C.Lede({ children: 'blink-backed x86_64 linux userspace, in your browser' }),
-          h('p', { style:'margin:8px 0 10px 0;color:var(--panel-text-2);max-width:62ch;font-size:15px;line-height:1.55' },
-            '~280 lines of host code over a 240 KB blink wasm. the wasm owns the cpu, mmu, ~150 linux x86_64 syscalls, and signals — no js instruction decoder, no js syscall ABI, no js vfs. the host just feeds ELFs in and pumps registers out.'),
-          h('p', { style:'margin:0 0 14px 0;color:var(--panel-text-2);max-width:62ch;font-size:13.5px;line-height:1.5;opacity:.85' },
-            'this build is POSIX · NOJIT · NOSOCK · single-threaded: sse2 only, sockets return ENOSYS. install from the alpine ecosystem with js-driven apk — live, in this tab.'),
-          h('div', { style:'display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px 0' },
-            C.Chip({ children:'15/15 tests' }),
-            C.Chip({ children:'node + bun parity' }),
-            C.Chip({ children:'browser witnessed' }),
-            C.Chip({ children:'<200L per file' }),
-            C.Chip({ children:'xstate v5' })
+        children: h('div', { class: 'wb-pad wb-hero' },
+          h('div', { class: 'wb-hero-text' },
+            C.Heading({ level: 1, style: 'margin:0 0 6px 0', children: 'webix' }),
+            h('p', { class: 'wb-hero-lede' }, 'blink-backed x86_64 linux userspace, in your browser'),
+            h('p', { class: 'wb-hero-body' },
+              '~280 lines of host code over a 240 KB blink wasm. the wasm owns the cpu, mmu, ~150 linux x86_64 syscalls, and signals — no js instruction decoder, no js syscall ABI, no js vfs. the host just feeds ELFs in and pumps registers out.'),
+            h('p', { class: 'wb-hero-sub' },
+              'this build is POSIX · NOJIT · NOSOCK · single-threaded: sse2 only, sockets return ENOSYS. install from the alpine ecosystem with js-driven apk — live, in this tab.'),
+            h('div', { style:'display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px 0' },
+              C.Chip({ children:'15/15 tests' }),
+              C.Chip({ children:'node + bun parity' }),
+              C.Chip({ children:'browser witnessed' }),
+              C.Chip({ children:'<200L per file' }),
+              C.Chip({ children:'xstate v5' })
+            ),
+            h('div', { style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center' },
+              C.Btn({ href:'#demo-runner', primary:true, children:'try it live' }),
+              C.Btn({ href:'https://github.com/AnEntrypoint/webix', children:'github' }),
+              C.Btn({ href:'https://www.npmjs.com/package/webix', children:'npm' }),
+              C.Btn({ onClick: toggleTheme, children: (currentTheme==='dark'?'light mode':'dark mode') })
+            )
           ),
-          h('div', { style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center' },
-            C.Btn({ href:'#demo-runner', primary:true, children:'try it live' }),
-            C.Btn({ href:'https://github.com/AnEntrypoint/webix', children:'github' }),
-            C.Btn({ href:'https://www.npmjs.com/package/webix', children:'npm' }),
-            C.Btn({ onclick: toggleTheme, children: (document.documentElement.getAttribute('data-theme')==='dark'?'light mode':'dark mode') })
+          h('div', { class: 'wb-hero-aside' },
+            h('div', { class: 'wb-term-card' },
+              h('div', { class: 'wb-term-bar' },
+                h('span', { class: 'wb-dot' }), h('span', { class: 'wb-dot' }), h('span', { class: 'wb-dot' }),
+                h('span', { class: 'wb-term-name' }, 'browser tab')
+              ),
+              h('pre', { class: 'wb-term-code' },
+                h('span', { class: 'c-mut' }, '$ '), h('span', null, 'npm install webix'), '\n',
+                h('span', { class: 'c-mut' }, '> '), h('span', null, 'node test.js'), '\n',
+                h('span', { class: 'c-ok' }, '  ✓ 15/15 passing'), '\n\n',
+                h('span', { class: 'c-mut' }, '// in the browser'), '\n',
+                h('span', null, 'await __debug.x86_64.ready'), '\n',
+                h('span', { class: 'c-ok' }, '  exit 42 · rax=0x3c · rdi=0x2a')
+              )
+            )
           )
         )
       });
@@ -361,14 +432,16 @@
       return h('div', { id: 'architecture' }, C.Panel({
         title: 'architecture',
         style: 'margin:8px',
-        children: items.map((it,i)=>C.RowLink({
-          key:'f'+i,
-          code: String(i+1).padStart(2,'0'),
-          title: it.name,
-          sub: it.desc,
-          meta: it.meta,
-          href: '#demo-runner'
-        }))
+        children: h('div', { class: 'wb-cards' },
+          ...items.map((it,i)=>h('div', { class: 'wb-card', key:'f'+i },
+            h('div', { class: 'wb-card-top' },
+              h('span', { class: 'wb-card-code' }, String(i+1).padStart(2,'0')),
+              h('span', { class: 'wb-card-meta' }, it.meta)
+            ),
+            h('div', { class: 'wb-card-title' }, it.name),
+            h('div', { class: 'wb-card-desc' }, it.desc)
+          ))
+        )
       }));
     }
 
@@ -385,13 +458,15 @@
       return C.Panel({
         title: 'what runs',
         style: 'margin:8px',
-        children: items.map((it,i)=>C.RowLink({
-          key:'e'+i,
-          title: it.name,
-          sub: it.desc,
-          meta: it.meta,
-          href: '#demo-runner'
-        }))
+        children: h('div', { class: 'wb-cards' },
+          ...items.map((it,i)=>h('div', { class: 'wb-card', key:'e'+i },
+            h('div', { class: 'wb-card-top' },
+              h('span', { class: 'wb-card-title-inline' }, it.name),
+              h('span', { class: 'wb-card-meta' }, it.meta)
+            ),
+            h('div', { class: 'wb-card-desc' }, it.desc)
+          ))
+        )
       });
     }
 
@@ -483,23 +558,45 @@
       });
     }
 
+    function header(){
+      const nav = [
+        ['demo','#demo-runner'],['shell','#cli-panel'],['display','#display-panel'],
+        ['architecture','#architecture'],['github','https://github.com/AnEntrypoint/webix'],
+        ['npm','https://www.npmjs.com/package/webix']
+      ];
+      return h('header', { class: 'wb-header' },
+        h('a', { class: 'wb-brand', href: '#top' },
+          h('span', { class: 'wb-brand-mark' }, '◰'),
+          h('span', { class: 'wb-brand-name' }, 'webix'),
+          h('span', { class: 'wb-brand-leaf' }, 'x86_64')
+        ),
+        h('nav', { class: 'wb-nav' },
+          ...nav.map(([label, href]) => h('a', {
+            href,
+            class: 'wb-nav-link',
+            target: href.startsWith('http') ? '_blank' : null,
+            rel: href.startsWith('http') ? 'noopener' : null
+          }, label))
+        )
+      );
+    }
+
+    function footer(){
+      const exit = state.lastExit !== null ? `exit ${state.lastExit}` : 'idle';
+      return h('footer', { class: 'wb-footer' },
+        h('span', { class: 'wb-foot-item wb-foot-accent' }, 'main · ' + state.status),
+        h('span', { class: 'wb-foot-spread' }),
+        h('span', { class: 'wb-foot-item' }, 'blink'),
+        h('span', { class: 'wb-foot-item' }, '15/15'),
+        h('span', { class: 'wb-foot-item' }, exit)
+      );
+    }
+
     function render(){
       reveal();
-      mount(document.getElementById('app'), () => C.AppShell({
-        topbar: C.Topbar({
-          brand: 'webix',
-          leaf: 'x86_64',
-          items: [
-            ['demo','#demo-runner'],
-            ['shell','#cli-panel'],
-            ['display','#display-panel'],
-            ['architecture','#architecture'],
-            ['github','https://github.com/AnEntrypoint/webix'],
-            ['npm','https://www.npmjs.com/package/webix']
-          ]
-        }),
-        crumb: C.Crumb({ leaf: 'x86_64 linux userspace, in your browser' }),
-        main: h('main', { class: 'wb-wrap' },
+      mount(document.getElementById('app'), () => h('div', { class: 'wb-page', id: 'top' },
+        header(),
+        h('main', { class: 'wb-wrap' },
           heroPanel(),
           livePanel(),
           termPanel(),
@@ -509,11 +606,9 @@
           examplesPanel(),
           quickstartPanel()
         ),
-        status: C.Status({
-          left:  ['main', state.status],
-          right: ['blink', '15/15', state.lastExit !== null ? `exit ${state.lastExit}` : 'idle']
-        })
-      }));
+        footer()
+      ));
+      applyTheme();
     }
 
     render();
