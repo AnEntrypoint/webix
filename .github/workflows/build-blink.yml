@@ -105,11 +105,17 @@ jobs:
           # Uncomment the HAVE_* that emscripten's musl libc genuinely provides.
           # (NOT HAVE_FORK: emscripten has no real fork(); leaving it off keeps
           # Blink on its no-fork path. NOT process-shared pthread mutexes.)
+          # NOTE: do NOT enable HAVE_GETRANDOM or HAVE_SYSINFO -- emscripten's
+          # musl does not export getrandom()/sysinfo() as linkable symbols, so
+          # enabling them makes wasm-ld fail with "undefined symbol: getrandom /
+          # sysinfo" (the probe would correctly have rejected these; the build
+          # already proved this). getentropy() IS provided, so HAVE_GETENTROPY
+          # is safe and covers Blink's randomness needs.
           for SYM in HAVE_PIPE2 HAVE_DUP3 HAVE_MAP_SHARED HAVE_MAP_ANONYMOUS \
                      HAVE_SCHED_YIELD HAVE_SCHED_H HAVE_GETENTROPY HAVE_CLOCK_SETTIME \
                      HAVE_STRCHRNUL HAVE_MEMCCPY HAVE_REALPATH HAVE_SEEKDIR \
                      HAVE_PREADV HAVE_VASPRINTF HAVE_WCWIDTH HAVE_FDATASYNC \
-                     HAVE_SYNC HAVE_SYSINFO HAVE_GETRANDOM HAVE_STRUCT_TIMEZONE; do
+                     HAVE_SYNC HAVE_STRUCT_TIMEZONE; do
             sed -i "s@^// #define $SYM\$@#define $SYM@" "$CFG"
           done
           echo "== config.h after patch =="
