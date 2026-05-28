@@ -104,6 +104,12 @@ jobs:
       - name: Smoke test (node, hand-built ELF)
         run: |
           node --experimental-vm-modules --no-warnings <<'EOF'
+          // The -pthread emscripten glue references the worker-scope global
+          // `self` at module-eval time; under Node's main thread that is
+          // undefined. Shim it (and the pthread pool spawns real worker_threads
+          // which set their own scope). This lets the threaded artifact be
+          // smoke-tested in Node CI without a browser.
+          globalThis.self ??= globalThis;
           const { createBlinkHost } = await import("./src/x86_64-blink.js");
           const fs = await import("node:fs");
           const host = await createBlinkHost({});
