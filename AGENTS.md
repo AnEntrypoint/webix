@@ -62,18 +62,51 @@ sampled items returned nothing). Full per-cycle detail is in recall
 memory (`mem-1779967657135-1-897`). The non-obvious caveats those cycles
 surfaced live in their own sections below.
 
-## Live CLI surface limits (v0.6.3 demo, witnessed 2026-05-04)
+## CAPABILITY UPDATE (v0.8.0, the portabox max-perf build, witnessed 2026-05-28)
+
+The vendored `containers/blinkenlib.wasm` (sha 3b9351bb7d1c, lanmower/blink
+@libblink-portabox, CI run 26594035720) is a **threaded, sockets-enabled,
+framebuffer-capable** build. This SUPERSEDES the NOSOCK / single-threaded /
+no-framebuffer / argv-space-joined / pipe=EBADF claims in the older sections
+below (kept for history). Current reality, witnessed by `test.js` 19/19:
+
+- **Threads ON.** Built `-pthread` with `--shared-memory --import-memory`
+  + `-sPTHREAD_POOL_SIZE=8`. The WASM memory is shared/imported, so read the
+  live buffer from `Module.HEAPU8.buffer` (NOT `wasmExports.memory`, which is
+  undefined for imported memory). Needs COOP/COEP (crossOriginIsolated) at
+  serve time for SharedArrayBuffer.
+- **Sockets ON.** `socket(AF_INET)` no longer ENOSYS (`--enable-sockets`).
+- **Framebuffer pipeline LIVE.** A guest publishes an RGBA framebuffer via
+  synthetic syscall `0x5fb` (vaddr,width,height,stride); the host reads
+  geometry via `blinkenlib_get_fb_*` and pixels zero-copy via
+  `blinkenlib_spy_address`. Proven end-to-end by `containers/fbtest.elf`
+  (320x240 gradient) + the `framebuffer pipeline` test. `src/display.js`
+  attaches it to a canvas on a rAF loop.
+- **argv NUL-separated.** Multi-word args survive the host->guest boundary
+  (NUL-separated buffer, parsed by `stringToArgsArray`). The space-joined
+  claim below is OBSOLETE.
+- **pipe() implemented, but pipelines need fork (absent).** `pipe()/pipe2()`
+  return valid FDs (no ENOSYS), but `sh -c 'a | b'` still cannot run because
+  each stage forks and **emscripten has no fork()** (`HAVE_FORK` stays OFF;
+  there is no real process creation under wasm). Concurrent GUI+CLI must use
+  cooperative scheduling or threads, never fork.
+- **JIT impossible.** Blink's JIT emits native x86-64/aarch64 only; under
+  wasm32 it is structurally impossible. NOJIT is permanent in-browser.
+
+---
+
+## Live CLI surface limits (v0.6.3 demo, witnessed 2026-05-04) [SUPERSEDED by v0.8.0 above]
 
 The in-page busybox shell at `#cli-panel` runs each command as a single
 `runElf(['./busybox', applet, ...args])` invocation. The actual reachable
-surface, witnessed against the POSIX NOJIT NOSOCK build:
+surface, witnessed against the (then-current) POSIX NOJIT NOSOCK build:
 
-- **argv space-joined upstream.** `blink-core.writeStr(argcPtr, argv.join(' '))`
-  means single-token args only. Quoted args lose grouping at the wasm boundary;
-  `printf 'FB %d\n' 4` becomes `printf FB %d\n 4`.
-- **No pipes.** `pipe()` returns EBADF — `echo hi | wc -c` fails with
-  `can't create pipe: Bad file descriptor`. Disqualifies sh-with-pipelines,
-  loops needing temp files, redirection.
+- **argv space-joined upstream.** [OBSOLETE: argv is now NUL-separated;
+  multi-word args survive.] The old `argv.join(' ')` scheme meant single-token
+  args only.
+- **Pipes.** [OBSOLETE: `pipe()` is implemented now; only full shell
+  pipelines remain blocked, by the absence of fork().] The old build returned
+  EBADF from `pipe()`.
 - **No FS persistence across runElf.** `/tmp/marker` written in run 1 is
   gone in run 2 even via direct `FS.readFile`. Treat the emscripten FS as
   ephemeral per call — each runElf is its own fresh boot.
@@ -84,20 +117,22 @@ surface, witnessed against the POSIX NOJIT NOSOCK build:
   `busybox` (usage). Failing: anything reading `/proc/*` (proc unmounted),
   `whoami` (no /etc/passwd), `seq` (signal 132, AVX-ish), pipes/loops/redirects.
 
-## Display residual (v0.6.3)
+## Display residual (v0.6.3) [SUPERSEDED by v0.8.0 capability update above]
 
-The display panel paints into a `<canvas>` via two parsers — ANSI tty
-(SGR colors, cursor reset) and an FB pixel protocol (`FB <w> <h>\n<base64
-rgba>\n`). The parsers and a JS-side demo frame are real and witnessed
-(`getImageData` returns a non-uniform gradient). What is **residual**:
+The original display panel used a stdout `FB <w> <h>\n<base64 rgba>\n`
+protocol because there was no shared-memory framebuffer. That indirection
+is OBSOLETE: the v0.8.0 build exposes a real zero-copy framebuffer via
+syscall 0x5fb + spy_address (see the capability update). What was residual
+then and is now RESOLVED:
 
-- No real X server. Build is NOJIT NOSOCK; no `/dev/fb0`, no mmap surface
-  exposed by blinkenlib, no shared linear memory window for the guest.
-- No guest-driven framebuffer emitter. argv space-joining + missing
-  `pipe()` mean a busybox-shell-only program cannot construct the
-  `FB W H\n<base64>\n` byte stream from inside the wasm. Fixing this
-  requires either (a) a custom static ELF that writes pre-baked pixel
-  data to stdout, or (b) lifting the build flags to enable pipes.
+- ~~No real X server / no mmap surface / no shared linear memory window.~~
+  RESOLVED: `blinkenlib_spy_address` returns a host pointer into guest memory;
+  the guest registers its mmap'd RGBA buffer via syscall 0x5fb. A full
+  Xfbdev/kdrive X server is the remaining piece (guest-display-producer),
+  but the host-side pipeline is done.
+- ~~No guest-driven framebuffer emitter.~~ RESOLVED: `containers/fbtest.elf`
+  is exactly that (raw-syscall mmap + gradient + register), and any fbdev
+  program can do the same.
 
 ## Witness host gotchas (v0.6.2)
 
@@ -166,18 +201,22 @@ runs were always unsafe (shared mutable stdoutBuf, lastSignal, lastExitCode
 across calls) but used to corrupt silently. Now they fail loud. If test.js
 calls runElf in a loop, ensure each Promise settles before the next call.
 
-## Build flag residuals (Blink wasm)
+## Build flag residuals (Blink wasm) [UPDATED v0.8.0]
 
-The vendored `containers/blinkenlib.wasm` is built `POSIX NOJIT NOSOCK`:
+The vendored `containers/blinkenlib.wasm` is now built **threaded + sockets +
+framebuffer** (lanmower/blink@libblink-portabox via `build-blink.yml`):
 
 - AVX/AVX-512 traps SIGILL — only SSE2 verified. Test
-  `containers/sse2-test.elf` succeeds; `avx-test.elf` returns 132.
-- `socket(AF_INET)` returns ENOSYS. Test asserts this directly.
-- pthread_create — single-threaded.
+  `containers/sse2-test.elf` succeeds; `avx-test.elf` returns 132. (Unchanged;
+  SSE2-only is a deliberate size/perf choice.)
+- ~~`socket(AF_INET)` returns ENOSYS.~~ RESOLVED: sockets enabled.
+- ~~pthread_create — single-threaded.~~ RESOLVED: `-pthread` build,
+  SharedArrayBuffer-backed; needs crossOriginIsolated at serve time.
+- fork() remains absent (emscripten limitation, not a flag). NOJIT permanent.
 
-These are upstream-Blink-build concerns, not host work. To unblock,
-use `gh workflow run build-blink.yml` with a different blink_repo
-fork patched for sockets/threads/AVX.
+The build is reproduced by `gh workflow run build-blink.yml` (defaults to
+lanmower/blink@libblink-portabox). The config.h force-defines step works
+around emconfigure's inability to run native probe binaries.
 
 ## apk add <name> — live network via a CORS proxy (v0.7.0, witnessed 2026-05-28)
 

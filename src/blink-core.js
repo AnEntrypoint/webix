@@ -177,7 +177,12 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   }
   return {
     Module, clstruct,
-    capabilities:{ tarMount:true, nodefs:!!Module.FS.filesystems?.NODEFS, sockets:true, threads:true, pipes:true, framebuffer:true, jit:false, vectorISA:"sse2" },
+    // Capability flags reflect the portabox max-perf build. `pipe` is the
+    // pipe()/pipe2() SYSCALL (implemented), distinct from `pipelines` (shell
+    // `a | b`) which needs fork() -- absent under emscripten, so false.
+    // `threads` requires crossOriginIsolated (COOP/COEP) at serve time for the
+    // SharedArrayBuffer the pthread pool needs.
+    capabilities:{ tarMount:true, nodefs:!!Module.FS.filesystems?.NODEFS, sockets:true, threads:true, sharedMemory:typeof SharedArrayBuffer!=="undefined", pipe:true, pipelines:false, fork:false, framebuffer:true, jit:false, vectorISA:"sse2" },
     fbInfo, fbView,
     mountTarBytes(tarBytes, onError){ extractTarToFS(Module.FS, tarBytes, onError) },
     mountNodeDir(hostDir, guestDir="/host"){
