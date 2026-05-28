@@ -175,6 +175,22 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
     const len=info.stride*info.height;
     return { ...info, pixels:new Uint8ClampedArray(memBuffer(Module),host,len) };
   }
+  // Host -> guest input. Maps display.js's event shape to the C input device
+  // (blinkenlib_push_input(type, code, x, y, value)). type: 1=key 2=motion
+  // 3=button. Guest drains via syscall 0x5fc. No-op (with a guard) if the
+  // running wasm predates the input device, so display.js stays graceful.
+  const INPUT_TYPE={ key:1, motion:2, button:3 };
+  const hasInputDevice=typeof Module._blinkenlib_push_input==="function";
+  function pushInput(evt){
+    if(!hasInputDevice || !evt) return false;
+    const type=INPUT_TYPE[evt.type]; if(!type) return false;
+    const code=(evt.code ?? evt.button ?? 0)|0;
+    const x=(evt.x ?? 0)|0, y=(evt.y ?? 0)|0;
+    const value=(evt.down ?? evt.value ?? 0)|0;
+    Module._blinkenlib_push_input(type, code, x, y, value);
+    return true;
+  }
+  function inputPending(){ return hasInputDevice ? Module._blinkenlib_input_pending() : 0; }
   return {
     Module, clstruct,
     // Capability flags reflect the portabox max-perf build. `pipe` is the
@@ -183,7 +199,7 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
     // `threads` requires crossOriginIsolated (COOP/COEP) at serve time for the
     // SharedArrayBuffer the pthread pool needs.
     capabilities:{ tarMount:true, nodefs:!!Module.FS.filesystems?.NODEFS, sockets:true, threads:true, sharedMemory:typeof SharedArrayBuffer!=="undefined", pipe:true, pipelines:false, fork:false, framebuffer:true, jit:false, vectorISA:"sse2" },
-    fbInfo, fbView,
+    fbInfo, fbView, pushInput, inputPending,
     mountTarBytes(tarBytes, onError){ extractTarToFS(Module.FS, tarBytes, onError) },
     mountNodeDir(hostDir, guestDir="/host"){
       const FS=Module.FS;

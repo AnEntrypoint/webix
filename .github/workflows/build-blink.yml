@@ -54,7 +54,7 @@ jobs:
           # branch so the JS host can map the guest framebuffer zero-copy.
           # (They are EMSCRIPTEN_KEEPALIVE too, but listing them here is robust
           # against dead-code elimination at -O levels.)
-          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_main"'
+          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_blinkenlib_push_input","_blinkenlib_input_pending","_main"'
           # Pthreads are required for Blink's fork()/clone()/futex emulation and
           # for real guest threads (emscripten implements fork via web workers +
           # SharedArrayBuffer). Without -pthread the configure probe reports
@@ -152,8 +152,9 @@ jobs:
           # ELF Blink executes. Static + freestanding (-nostdlib, our own _start)
           # so there is no libc/loader dependency inside the guest.
           gcc -static -nostdlib -O2 -fno-stack-protector -o containers/fbtest.elf containers/fbtest.c
-          file containers/fbtest.elf || true
-          ls -la containers/fbtest.elf
+          gcc -static -nostdlib -O2 -fno-stack-protector -o containers/inputtest.elf containers/inputtest.c
+          file containers/fbtest.elf containers/inputtest.elf || true
+          ls -la containers/fbtest.elf containers/inputtest.elf
 
       - name: Smoke test (node, hand-built ELF)
         run: |
@@ -211,6 +212,31 @@ jobs:
           console.log("fb smoke ok: 320x240 gradient registered + read zero-copy; generation=", info.generation);
           EOF
 
+      - name: Input device smoke (host push -> guest drain)
+        run: |
+          # Push input events into the host ring, then run the guest inputtest
+          # which drains them via syscall 0x5fc and exits with the event count.
+          # Proves the host->guest input path end-to-end.
+          node --experimental-vm-modules --no-warnings <<'EOF'
+          globalThis.self ??= globalThis;
+          const { createBlinkHost } = await import("./src/x86_64-blink.js");
+          const fs = await import("node:fs");
+          const host = await createBlinkHost({});
+          if (typeof host.pushInput !== "function" || !host.Module._blinkenlib_push_input) {
+            console.error("input smoke: pushInput/_blinkenlib_push_input missing"); process.exit(1);
+          }
+          // key down code=65 value=1, then a motion to (10,20).
+          host.pushInput({ type: "key", code: 65, down: 1 });
+          host.pushInput({ type: "motion", x: 10, y: 20 });
+          if (host.inputPending() !== 2) { console.error("input smoke: pending != 2", host.inputPending()); process.exit(1); }
+          const elf = fs.readFileSync("containers/inputtest.elf");
+          const r = await host.runElf(elf, { argv: ["inputtest"], progname: "/program" });
+          if (r.exitCode !== 2) { console.error("input smoke: guest drained != 2", r); process.exit(1); }
+          if (!/type=1 code=65 value=1/.test(r.stdout)) { console.error("input smoke: wrong first event", r.stdout); process.exit(1); }
+          if (host.inputPending() !== 0) { console.error("input smoke: ring not drained", host.inputPending()); process.exit(1); }
+          console.log("input smoke ok:", JSON.stringify(r.stdout.trim()));
+          EOF
+
       - name: Commit rebuilt artifacts
         env:
           BLINK_REPO: ${{ inputs.blink_repo || 'lanmower/blink' }}
@@ -218,7 +244,7 @@ jobs:
         run: |
           git config user.email "github-actions@users.noreply.github.com"
           git config user.name "github-actions"
-          git add containers/blinkenlib.wasm containers/blinkenlib.js containers/fbtest.elf containers/fbtest.c
+          git add containers/blinkenlib.wasm containers/blinkenlib.js containers/fbtest.elf containers/fbtest.c containers/inputtest.elf containers/inputtest.c
           if git diff --cached --quiet; then
             echo "no changes"; exit 0
           fi
