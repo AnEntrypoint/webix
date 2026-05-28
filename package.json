@@ -1,6 +1,6 @@
 {
   "name": "webix",
-  "version": "0.6.2",
+  "version": "0.8.0",
   "type": "module",
   "description": "Blink-backed x86_64 Linux userspace emulator with XState orchestration. Browser + Node.",
   "bin": {
@@ -39,6 +39,8 @@
     "public/",
     "containers/blinkenlib.wasm",
     "containers/blinkenlib.js",
+    "containers/fbtest.elf",
+    "containers/inputtest.elf",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
@@ -55,6 +57,7 @@
     "./blink": "./src/x86_64-blink.js",
     "./blink-browser": "./src/x86_64-blink-browser.js",
     "./blink-core": "./src/blink-core.js",
+    "./display": "./src/display.js",
     "./kernel": "./src/kernel.js"
   },
   "browser": "./src/browser.js",
