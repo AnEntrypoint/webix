@@ -312,3 +312,31 @@ contract: `ready:true exitCode:42 rax:3c rdi:2a apkPresent:true`,
 `failures:[]` (zero 404s), CLI `echo hi there → exit 0`, and
 `apk.addUrl(busybox-static.apk)` taking the installed list 0→1. Also fixed a
 stale `C.Status` count (`11/11`→`15/15`) the v0.6.5 sweep missed.
+
+## anentrypoint-design SDK gotchas (de-jank pass, v0.6.7, witnessed 2026-05-28)
+
+The page looked dead/janky; root causes were all SDK-usage traps. Recorded
+in recall memory too (`mem-*-3`). When editing `docs/index.html`:
+
+- **`C.Btn`/`C.RowLink` want `onClick` (capital C), not `onclick`.** The SDK
+  binds `onClick` via `addEventListener`; a lowercase `onclick` is treated as
+  a raw attribute and the handler NEVER fires. Every demo/CLI/theme button was
+  silently inert (boot only ran from the auto `boot()` at load). Native
+  `h('a',{onclick})`/`h('input',{oninput})` elements still use lowercase.
+- **`C.AppShell` is a fixed-viewport dashboard shell, not a page frame.**
+  `.app-main{overflow:auto;height:100%}` inside `.app-body{flex:1;grid rows
+  minmax(0,1fr)}` traps tall content in an internal scroll pane — the landing
+  page was cut off at the live-witness panel with an empty right half. For a
+  scrolling page use document flow: sticky `.wb-header` + panels in `.wb-wrap`
+  + footer. Witness `bodyScrollH == mainScrollH`, no clamped-overflow ancestor.
+- **`C.RowLink` collapses title+sub into a ~120px column** (it's a list-row
+  expecting middle content). Use a responsive card grid for feature lists.
+- **`--ink` is a FIXED dark brand color; `--fg` is theme-aware.** Custom text
+  on the page background must use `var(--fg,…)` — `--ink` rendered the hero
+  lede dark-on-dark (invisible) in dark mode. `--panel-text*` for muted text.
+- **`installStyles()` sets `data-theme="auto"`** (matches no rule). Re-assert a
+  concrete `dark`/`light` value AFTER each `mount()` and persist to
+  `localStorage`; the SDK re-applies "auto" on every mount.
+- **Witnessing button clicks needs trusted events** (`page.mouse.click(x,y)`);
+  a synthetic `MouseEvent('click')` dispatch does NOT fire SDK-delegated
+  handlers, so it falsely reads as a dead button.
