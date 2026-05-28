@@ -179,6 +179,32 @@ These are upstream-Blink-build concerns, not host work. To unblock,
 use `gh workflow run build-blink.yml` with a different blink_repo
 fork patched for sockets/threads/AVX.
 
+## apk add <name> — same-origin bundled repo (v0.6.9, witnessed 2026-05-28)
+
+`apk add nano` (bare name) is supported via a **same-origin bundled repo**,
+NOT a live mirror. Alpine mirrors send **no CORS headers** (verified: dl-cdn,
+the official Fastly CDN `alpine.global.ssl.fastly.net`, uk, clarkson all lack
+`access-control-allow-origin` even with an `Origin` header), and public CORS
+proxies are unreliable — so a static gh-pages page cannot fetch the real repo.
+Instead, curated `.apk` files + `manifest.json` are vendored into
+`docs/assets/apk/` (committed; un-ignored via `docs/assets/apk/**` since CI
+can't fetch them). `alpine-apk.js` `addByName(name,{baseUrl})` loads the
+manifest, resolves the name or a provide-token (`cmd:`/`so:`), installs
+`depends` first (`so:`/`cmd:`/`pc:` tokens not in the manifest are assumed
+satisfied by the mounted base rootfs), fetches each `.apk` same-origin,
+idempotent via `isInstalled`. `cli.js`: bare name → `addByName`, `.apk`
+filename/URL → `addUrl`. **To add a package**: download its `.apk` + dep
+closure from dl-cdn into `docs/assets/apk/`, add manifest entries
+`{version,file,provides,depends}`, commit. Witnessed: `apk add nano` installs
+nano + libncursesw + ncurses-terminfo-base and the extracted `/usr/bin/nano`
+runs `nano --version` → exit 0. The format helpers were split into
+`src/apk-format.js` to stay under the 200-line cap (pages.yml `cp`s it).
+
+**CORS-witnessing gotcha**: the Playwright/automated chromium runs with web
+security disabled, so a cross-origin `fetch()` returns `type:"basic"` 200 (a
+FALSE POSITIVE for CORS). Verify real CORS with `curl -I -H Origin` from the
+shell, never the test browser.
+
 ## Alpine apk install (v0.6.4, witnessed 2026-05-28)
 
 The gh-pages demo can install from the Alpine package ecosystem. Because
