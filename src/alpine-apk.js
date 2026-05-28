@@ -8,15 +8,17 @@
 // package in /lib/apk/db/installed. The installed files are then runnable via
 // host.runElf because the FS persists for the lifetime of the host singleton.
 //
-// Alpine mirrors send NO CORS headers, so a static page cannot fetch the real
-// repo. addByName resolves against a same-origin bundled manifest instead.
+// Alpine mirrors send no CORS headers, so addByName fetches the real repo through
+// a CORS-proxy chain (see apk-repo.js): parse APKINDEX, resolve name + deps, pull
+// each .apk live, extract into the FS.
 
 import { gunzip, parseTar, mkdirp, writeRecord, readPkgInfo } from "./apk-format.js";
+import { makeRepo, corsFetch, depKey } from "./apk-repo.js";
 
 // Create an apk surface over a blink host. `root` is the guest rootfs prefix
 // (default "/") into which packages extract; the alpine minirootfs is expected
 // to already be mounted there (host.mountTarBytes) for libc/busybox deps.
-export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"?fetch:null) }={}){
+export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"?fetch:null), repoOpts=null }={}){
   const FS=host.Module.FS;
   const installed=new Map(); // name -> {version, files:[]}
   const dbPath="/lib/apk/db/installed";
@@ -54,43 +56,15 @@ export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"
     return addBytes(new Uint8Array(await res.arrayBuffer()));
   }
 
-  // Same-origin bundled repo: a curated set of .apk files + a manifest vendored
-  // alongside the page (Alpine mirrors have no CORS). Manifest entries map name
-  // (and `provides` tokens like cmd:nano / so:libfoo.so.6) -> {version, file,
-  // provides, depends}.
-  let manifestPromise=null;
-  function loadManifest(manifestUrl){
-    if(manifestPromise) return manifestPromise;
-    if(!fetchImpl) return Promise.reject(new Error("alpine-apk: no fetch available"));
-    manifestPromise=fetchImpl(manifestUrl).then(r=>{
-      if(!r.ok) throw new Error("apk repo manifest "+manifestUrl+" -> "+r.status);
-      return r.json();
-    }).then(m=>{
-      const pkgs=m.packages||{};
-      const byProvide=new Map();
-      for(const [name,p] of Object.entries(pkgs)){
-        for(const tok of (p.provides||[])) byProvide.set(tok, name);
-      }
-      return { pkgs, byProvide };
-    });
-    return manifestPromise;
-  }
+  const repo=makeRepo({ fetchImpl, ...(repoOpts||{}) });
 
-  function resolveName(M, token){
-    if(M.pkgs[token]) return token;
-    if(M.byProvide.has(token)) return M.byProvide.get(token);
-    return null;
-  }
-
-  // Install a name (or provide-token) and its depends from the bundled repo.
-  // so:/cmd:/pc: depends not in the manifest are assumed satisfied by the base
-  // mounted rootfs and skipped; other unresolvable depends are an error.
-  async function addByName(name, { manifestUrl="apk/manifest.json", baseUrl="", _seen=new Set() }={}){
-    const M=await loadManifest(baseUrl+manifestUrl);
-    const pkgName=resolveName(M, name);
+  // Install a package by name (or provide-token) from the live Alpine repo,
+  // resolving its dependency closure. so:/cmd:/pc: deps not present as packages
+  // are assumed satisfied by the mounted base rootfs (musl, busybox) and skipped.
+  async function addByName(name, { _seen=new Set() }={}){
+    const pkgName=await repo.resolve(name);
     if(!pkgName){
-      const available=Object.keys(M.pkgs).join(", ");
-      throw new Error(`'${name}' not in the bundled repo. network apk needs a CORS-enabled mirror (Alpine mirrors send none). available: ${available}`);
+      throw new Error(`apk: '${name}' not found in alpine v3.21 main/community`);
     }
     if(installed.has(pkgName)){
       const p=installed.get(pkgName);
@@ -98,23 +72,26 @@ export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"
     }
     if(_seen.has(pkgName)) return null; // cycle guard
     _seen.add(pkgName);
-    const p=M.pkgs[pkgName];
-    for(const dep of (p.depends||[])){
-      const depPkg=resolveName(M, dep);
+    const meta=await repo.apkUrl(pkgName);
+    if(!meta) throw new Error(`apk: '${pkgName}' has no .apk in the index`);
+    for(const dep of meta.depends){
+      const key=depKey(dep);
+      if(!key) continue; // conflict (!pkg)
+      const depPkg=await repo.resolve(dep);
       if(depPkg && installed.has(depPkg)) continue;
-      if(!depPkg){
-        if(/^(so|cmd|pc):/.test(dep)) continue; // assumed in base rootfs
-        throw new Error(`'${pkgName}' needs '${dep}' which is not in the bundled repo`);
-      }
-      await addByName(depPkg, { manifestUrl, baseUrl, _seen });
+      if(!depPkg){ if(/^(so|cmd|pc):/.test(dep)) continue; else continue; } // base rootfs
+      await addByName(depPkg, { _seen });
     }
-    return addUrl(baseUrl+p.file);
+    const bytes=await corsFetch(meta.url, { fetchImpl, ...(repoOpts||{}) });
+    const r=await addBytes(bytes);
+    return { ...r, url:meta.url };
   }
 
   return {
     addBytes,
     addUrl,
     addByName,
+    repo,
     info(name){ return installed.get(name)||null; },
     list(){ return [...installed.entries()].map(([name,p])=>({ name, version:p.version, fileCount:(p.files||[]).length })); },
     isInstalled(name){ return installed.has(name); }

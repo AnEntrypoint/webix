@@ -57,8 +57,9 @@ export function createCli({ onLine, onStatus }){
             const url = /^https?:\/\//.test(target) ? target : (ASSETS + target);
             r = await x.apk.addUrl(url);
           } else {
-            // a bare package name -> resolve against the same-origin bundled repo
-            r = await x.apk.addByName(target, { baseUrl: ASSETS });
+            // a bare package name -> resolve+fetch live from the Alpine repo
+            // (via a CORS proxy; Alpine mirrors send no CORS headers)
+            r = await x.apk.addByName(target);
           }
           out.push(r.alreadyInstalled
             ? `${r.name} (${r.version||'?'}) is already installed`
@@ -131,7 +132,7 @@ export function createCli({ onLine, onStatus }){
     return [
       'webix busybox shell — single-applet per line.',
       'try: ls -la /  ·  uname -a  ·  date  ·  cal  ·  expr 7 \\* 6  ·  id  ·  --list',
-      'alpine: apk add nano  ·  apk list  ·  apk info <pkg>  (bundled same-origin repo)',
+      'alpine: apk add <pkg>  ·  apk list  ·  apk info <pkg>  (live from the alpine repo via CORS proxy)',
       'caveats: no pipes, no /tmp persistence, argv space-joined (quoted args lose grouping).',
       ''
     ].join('\n');

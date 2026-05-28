@@ -179,31 +179,45 @@ These are upstream-Blink-build concerns, not host work. To unblock,
 use `gh workflow run build-blink.yml` with a different blink_repo
 fork patched for sockets/threads/AVX.
 
-## apk add <name> — same-origin bundled repo (v0.6.9, witnessed 2026-05-28)
+## apk add <name> — live network via a CORS proxy (v0.7.0, witnessed 2026-05-28)
 
-`apk add nano` (bare name) is supported via a **same-origin bundled repo**,
-NOT a live mirror. Alpine mirrors send **no CORS headers** (verified: dl-cdn,
-the official Fastly CDN `alpine.global.ssl.fastly.net`, uk, clarkson all lack
-`access-control-allow-origin` even with an `Origin` header), and public CORS
-proxies are unreliable — so a static gh-pages page cannot fetch the real repo.
-Instead, curated `.apk` files + `manifest.json` are vendored into
-`docs/assets/apk/` (committed; un-ignored via `docs/assets/apk/**` since CI
-can't fetch them). `alpine-apk.js` `addByName(name,{baseUrl})` loads the
-manifest, resolves the name or a provide-token (`cmd:`/`so:`), installs
-`depends` first (`so:`/`cmd:`/`pc:` tokens not in the manifest are assumed
-satisfied by the mounted base rootfs), fetches each `.apk` same-origin,
-idempotent via `isInstalled`. `cli.js`: bare name → `addByName`, `.apk`
-filename/URL → `addUrl`. **To add a package**: download its `.apk` + dep
-closure from dl-cdn into `docs/assets/apk/`, add manifest entries
-`{version,file,provides,depends}`, commit. Witnessed: `apk add nano` installs
-nano + libncursesw + ncurses-terminfo-base and the extracted `/usr/bin/nano`
-runs `nano --version` → exit 0. The format helpers were split into
-`src/apk-format.js` to stay under the 200-line cap (pages.yml `cp`s it).
+`apk add <any alpine pkg>` fetches the **real Alpine repo live** over the
+network. Alpine mirrors send **no CORS headers** (verified by curl + a real
+in-browser fetch: direct `fetch()` from gh-pages = `TypeError: Failed to
+fetch`), so the request routes through a CORS-proxy chain in `src/apk-repo.js`:
+
+- **`codetabs` is the one reliable public CORS proxy**: `https://api.codetabs.com/v1/proxy/?quest=<RAW-url>`
+  (raw url, no encoding). Verified `type:"cors"` 200, full binary intact
+  (index 487154 B, nano.apk 161355 B exact), `acao:*`, 6/6 rapid calls, no
+  rate limit, sub-second. Researched ~25 proxies; **every other one failed**
+  (corsproxy.io 403, allorigins 000/522, thingproxy 000, proxy.cors.sh/cors.eu.org/cors.lol/everyorigin 429,
+  isomorphic-git/cloudflare-ex 403, wsrv/yacdn/jina/whateverorigin/htmldriven/12ft 404/000/422/301).
+- `corsFetch(url)` tries **direct first** (free when a browser/extension
+  allows it), then `[codetabs, allorigins-raw, corsproxy.io]`; allorigins +
+  corsproxy are best-effort fallbacks for when codetabs blips. On total
+  failure it throws naming every attempt (no silent hang).
+- `makeRepo()` fetches + gunzips + untars `APKINDEX.tar.gz` from
+  `dl-cdn.alpinelinux.org/alpine/v3.21/{main,community}/x86_64`, parses the
+  `P/V/D/p` records into `byName`+`byProvide` maps (cached), resolves a name
+  or provide-token (`cmd:`/`so:`), strips dep version constraints
+  (`>=`/`=`/`~`/`<`, ignores `!conflicts`), constructs `<repo>/<P>-<V>.apk`.
+- `addByName(name)` resolves the dep closure, `corsFetch`es each `.apk`,
+  installs via `addBytes`, idempotent via `isInstalled`. so:/cmd:/pc: deps
+  with no package are assumed satisfied by the mounted base rootfs.
+
+Witnessed live-network: `apk add nano` pulled nano + libncursesw +
+ncurses-terminfo-base + musl from dl-cdn (url confirms real mirror) and
+`/usr/bin/nano --version` → exit 0 "GNU nano, version 8.2"; `apk add tree`
+(2.2.1-r0) proves arbitrary packages work; unknown name → "not found in
+alpine v3.21 main/community". Files: `alpine-apk.js` (99L), `apk-repo.js`
+(100L, the network layer), `apk-format.js` (110L, gzip/tar) — all under the
+200-line cap; pages.yml `cp`s all three. The old bundled `docs/assets/apk/`
+repo was removed.
 
 **CORS-witnessing gotcha**: the Playwright/automated chromium runs with web
-security disabled, so a cross-origin `fetch()` returns `type:"basic"` 200 (a
-FALSE POSITIVE for CORS). Verify real CORS with `curl -I -H Origin` from the
-shell, never the test browser.
+security disabled, so a cross-origin `fetch()` of a non-CORS mirror can return
+`type:"basic"` 200 (a FALSE POSITIVE). Trust `type:"cors"` (genuine) and
+verify with `curl -I -H Origin` from the shell.
 
 ## Alpine apk install (v0.6.4, witnessed 2026-05-28)
 
