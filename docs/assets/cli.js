@@ -129,11 +129,10 @@ export function createCli({ onLine, onStatus }){
   }
 
   function intro(){
+    // the page seeds its own MOTD on boot; keep this minimal to avoid a double banner.
     return [
-      'webix busybox shell — single-applet per line.',
-      'try: ls -la /  ·  uname -a  ·  date  ·  cal  ·  expr 7 \\* 6  ·  id  ·  --list',
-      'alpine: apk add <pkg>  ·  apk list  ·  apk info <pkg>  (live from the alpine repo via CORS proxy)',
-      'caveats: no pipes, no /tmp persistence, argv space-joined (quoted args lose grouping).',
+      'busybox shell - one applet per line. caveats: no pipes, no /tmp persistence,',
+      'argv is space-joined (quoted args lose grouping).',
       ''
     ].join('\n');
   }
