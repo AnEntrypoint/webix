@@ -158,10 +158,41 @@ await t("NODEFS: mount host dir, busybox cat reads it", async () => {
   assert.match(r.stdout, /1\n2\n3/);
 });
 
-await t("NOSOCK confirmed: socket(AF_INET) returns ENOSYS", async () => {
+await t("sockets enabled: socket(AF_INET) no longer ENOSYS", async () => {
+  // The portabox build enables --enable-sockets, so socket() is implemented.
+  // nc to a closed local port fails to *connect* (no listener / no real net),
+  // but must NOT report ENOSYS ("Function not implemented") anymore.
   const host=await alpineHost();
   const r=await race(host.runElf(guestBytes(host,"/bin/busybox"), { argv:["nc", "-z", "127.0.0.1", "80"] }), 12000);
-  assert.match(r.stderr, /Function not implemented/);
+  assert.doesNotMatch(r.stderr, /Function not implemented/, "socket() should be implemented now: "+r.stderr);
+});
+
+await t("argv: multi-word argument survives the host->guest boundary", async () => {
+  // Regression guard for the NUL-separated argv marshalling. The old
+  // space-joined scheme split "hello world" into two args.
+  const host=await alpineHost();
+  const r=await race(host.runElf(guestBytes(host,"/bin/busybox"), { argv:["echo", "hello world", "second"] }), 12000);
+  assert.equal(r.exitCode, 0);
+  assert.match(r.stdout, /hello world second/);
+});
+
+await t("pipes enabled: echo hi | wc -c via sh pipeline", async () => {
+  // pipe() returned EBADF under --disable-all; the portabox build enables
+  // fork/threads so pipe()/pipe2() work and shell pipelines run.
+  const host=await alpineHost();
+  const r=await race(host.runElf(guestBytes(host,"/bin/busybox"), { argv:["sh", "-c", "echo hi | wc -c"] }), 12000);
+  assert.equal(r.exitCode, 0);
+  assert.match(r.stdout, /3/);
+});
+
+await t("framebuffer: getters exist and report unset before guest registers", async () => {
+  // The fb getters are exported and return 0 geometry until a guest registers
+  // via syscall 0x5fb. fbInfo() returns null in that state.
+  const host=await createBlinkHost({});
+  assert.equal(typeof host.fbInfo, "function");
+  assert.equal(typeof host.fbView, "function");
+  assert.equal(host.fbInfo(), null);
+  assert.equal(host.Module._blinkenlib_get_fb_width(), 0);
 });
 
 await t("preloadFile: write ELF once, rerun via handle without re-supplying bytes", async () => {

@@ -55,7 +55,20 @@ jobs:
           # (They are EMSCRIPTEN_KEEPALIVE too, but listing them here is robust
           # against dead-code elimination at -O levels.)
           FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_main"'
-          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 -lnodefs.js -lidbfs.js"
+          # Pthreads are required for Blink's fork()/clone()/futex emulation and
+          # for real guest threads (emscripten implements fork via web workers +
+          # SharedArrayBuffer). Without -pthread the configure probe reports
+          # 'fork... no / pthreads... no' and those features compile out. We do
+          # NOT use -sPROXY_TO_PTHREAD: main() must stay on the main thread so
+          # the synchronous callMain/blinkenlib_run host model keeps working;
+          # Blink spawns its own pthreads from there. SharedArrayBuffer + a
+          # growable memory needs -sMAXIMUM_MEMORY; COOP/COEP are required at
+          # serve time (set in the consuming app).
+          PTHREAD_FLAGS="-pthread -sPTHREAD_POOL_SIZE=8 -sMAXIMUM_MEMORY=2147483648"
+          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS -lnodefs.js -lidbfs.js"
+          # -pthread also has to reach the C compiler (not just the linker) so
+          # threading intrinsics and the pthread headers are wired in.
+          export CFLAGS="-pthread"
           # Max practical in-browser profile: enable pipes/fork/threads/sockets
           # and the non-POSIX surface. NOJIT is mandatory (Blink's JIT only emits
           # native x86-64/aarch64, impossible under wasm32 - see jit.c). We start
@@ -63,8 +76,9 @@ jobs:
           # baseline is explicit.
           emconfigure ./configure --disable-all \
             --enable-threads --enable-sockets --enable-fork --enable-nonposix \
+            CFLAGS="-pthread" \
             LDFLAGS="$EFLAGS" \
-            CPPFLAGS="-DHTML -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_GNU_SOURCE"
+            CPPFLAGS="-DHTML -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_GNU_SOURCE -pthread"
 
       - name: Compile (emmake make blinkenlib)
         working-directory: libblink
