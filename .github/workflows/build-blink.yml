@@ -6,11 +6,11 @@ on:
       blink_repo:
         description: "Blink fork to build"
         type: string
-        default: "robalb/blink"
+        default: "lanmower/blink"
       blink_ref:
         description: "Branch/tag/sha"
         type: string
-        default: "libblink"
+        default: "libblink-portabox"
       with_node_env:
         description: "Add node to ENVIRONMENT (frees us from polyfill)"
         type: boolean
@@ -36,13 +36,13 @@ jobs:
 
       - name: Clone blink fork
         env:
-          BLINK_REPO: ${{ inputs.blink_repo || 'robalb/blink' }}
-          BLINK_REF: ${{ inputs.blink_ref || 'libblink' }}
+          BLINK_REPO: ${{ inputs.blink_repo || 'lanmower/blink' }}
+          BLINK_REF: ${{ inputs.blink_ref || 'libblink-portabox' }}
         run: |
           echo "cloning $BLINK_REPO@$BLINK_REF"
           git clone --depth 1 --branch "$BLINK_REF" "https://github.com/$BLINK_REPO.git" libblink
 
-      - name: Configure (emconfigure --disable-all + ESM exports)
+      - name: Configure (max-perf profile + framebuffer/argv exports)
         working-directory: libblink
         env:
           WITH_NODE_ENV: ${{ inputs.with_node_env }}
@@ -50,8 +50,19 @@ jobs:
           ENV_VAL="web,worker,node"
           if [ "$WITH_NODE_ENV" = "false" ]; then ENV_VAL="web,worker"; fi
           EXPORTS='"UTF8ToString","stringToNewUTF8","AsciiToString","FS","callMain","addFunction","wasmExports"'
-          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sFORCE_FILESYSTEM=1 -lnodefs.js -lidbfs.js"
+          # Explicitly export the framebuffer getters added in the portabox
+          # branch so the JS host can map the guest framebuffer zero-copy.
+          # (They are EMSCRIPTEN_KEEPALIVE too, but listing them here is robust
+          # against dead-code elimination at -O levels.)
+          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_main"'
+          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 -lnodefs.js -lidbfs.js"
+          # Max practical in-browser profile: enable pipes/fork/threads/sockets
+          # and the non-POSIX surface. NOJIT is mandatory (Blink's JIT only emits
+          # native x86-64/aarch64, impossible under wasm32 - see jit.c). We start
+          # from --disable-all then re-enable the wanted features so the preset
+          # baseline is explicit.
           emconfigure ./configure --disable-all \
+            --enable-threads --enable-sockets --enable-fork --enable-nonposix \
             LDFLAGS="$EFLAGS" \
             CPPFLAGS="-DHTML -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_GNU_SOURCE"
 
@@ -90,8 +101,8 @@ jobs:
 
       - name: Commit rebuilt artifacts
         env:
-          BLINK_REPO: ${{ inputs.blink_repo || 'robalb/blink' }}
-          BLINK_REF: ${{ inputs.blink_ref || 'libblink' }}
+          BLINK_REPO: ${{ inputs.blink_repo || 'lanmower/blink' }}
+          BLINK_REF: ${{ inputs.blink_ref || 'libblink-portabox' }}
         run: |
           git config user.email "github-actions@users.noreply.github.com"
           git config user.name "github-actions"

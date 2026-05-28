@@ -113,9 +113,47 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
     for(let i=0;i<n;i++) view.setUint8(ptr+i,str.charCodeAt(i));
     view.setUint8(ptr+n,0);
   }
+  // Write an argv array as a NUL-separated buffer terminated by a double NUL.
+  // Matches stringToArgsArray() in blinkenlib.c, which splits on NUL so that
+  // arguments containing spaces survive (the old space-joined scheme broke
+  // every multi-word arg). ARGC_MAX_LINE_LEN is 4096 in the patched build.
+  function writeArgv(ptr,args,max){
+    const enc=new TextEncoder();
+    const view=new Uint8Array(Module.wasmExports.memory.buffer);
+    let off=0;
+    for(const a of args){
+      const bytes=enc.encode(String(a));
+      if(off+bytes.length+2>max) break; // leave room for two NULs
+      view.set(bytes,ptr+off); off+=bytes.length;
+      view[ptr+off]=0; off++;
+    }
+    view[ptr+off]=0; // terminating empty arg
+  }
+  // Framebuffer accessors: geometry published by the guest via the synthetic
+  // 0x5fb syscall, pixels mapped zero-copy through spy_address(fb_vaddr).
+  function fbInfo(){
+    const w=Module._blinkenlib_get_fb_width();
+    const h=Module._blinkenlib_get_fb_height();
+    if(!w||!h) return null;
+    return {
+      vaddr:Module._blinkenlib_get_fb_vaddr(),
+      width:w, height:h,
+      stride:Module._blinkenlib_get_fb_stride(),
+      generation:Module._blinkenlib_get_fb_generation(),
+    };
+  }
+  // Return a fresh Uint8ClampedArray view over the guest framebuffer. Must be
+  // re-derived each frame: ALLOW_MEMORY_GROWTH detaches the old ArrayBuffer.
+  function fbView(){
+    const info=fbInfo(); if(!info) return null;
+    const host=Module._blinkenlib_get_fb_ptr(); if(!host) return null;
+    const len=info.stride*info.height;
+    return { ...info, pixels:new Uint8ClampedArray(Module.wasmExports.memory.buffer,host,len) };
+  }
   return {
     Module, clstruct,
-    capabilities:{ tarMount:true, nodefs:!!Module.FS.filesystems?.NODEFS, nosock:true, vectorISA:"sse2" },
+    capabilities:{ tarMount:true, nodefs:!!Module.FS.filesystems?.NODEFS, sockets:true, threads:true, pipes:true, framebuffer:true, jit:false, vectorISA:"sse2" },
+    fbInfo, fbView,
     mountTarBytes(tarBytes, onError){ extractTarToFS(Module.FS, tarBytes, onError) },
     mountNodeDir(hostDir, guestDir="/host"){
       const FS=Module.FS;
@@ -169,9 +207,10 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
         FS.write(s,u8,0,u8.length,0); FS.close(s); FS.chmod("/program",0o755);
         lastLoaded=writeKey;
       }
-      writeStr(prognamePtr,progname,200);
-      writeStr(argcPtr, argv.length?argv.join(" "):progname, 200);
-      writeStr(argvPtr,"",200);
+      writeStr(prognamePtr,progname,1024);
+      // NUL-separated argv (patched blinkenlib parses on NUL, buffer is 4096).
+      writeArgv(argcPtr, argv.length?argv:[progname], 4096);
+      writeStr(argvPtr,"",4096);
       outBytes=[]; errBytes=[]; lastSignal=null; lastExitCode=null;
       const done=new Promise((resolve,reject)=>{ exitDeferred={resolve,reject} });
       Module._blinkenlib_run();
