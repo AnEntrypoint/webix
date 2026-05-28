@@ -11,6 +11,8 @@ on:
       - "containers/hello-x86_64.elf"
       - "containers/busybox-x86_64.elf"
       - "containers/sse2-test.elf"
+      - "containers/alpine-minirootfs-x86_64.tar.gz"
+      - "containers/busybox-static.apk"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -39,6 +41,9 @@ jobs:
           cp src/blink-core.js              docs/assets/
           cp src/x86_64-blink-browser.js    docs/assets/
           cp src/x86_64-witness-bootstrap.js docs/assets/
+          cp src/alpine-apk.js              docs/assets/
+          cp containers/alpine-minirootfs-x86_64.tar.gz docs/assets/
+          cp containers/busybox-static.apk  docs/assets/
           ls -lh docs/assets/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

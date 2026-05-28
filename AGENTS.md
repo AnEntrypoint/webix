@@ -56,43 +56,11 @@ documented in user CLAUDE.md.
 
 ## Learning audit
 
-**Cycle 1 (2026-05-01)**: Baseline audit. Sampled 5 AGENTS.md items
-(Blink owns surface, test.js single, <200L per file, xstate v5, do not
-restore list). rs-learn was fresh (0 prior ingests). 0 items migrated
-(baseline — store must internalize before recall succeeds). 10 new facts
-ingested to rs-learn (webix v0.6.1 architecture, kernel, browser split,
-npm pack, CI, licenses, deleted files). Next cycle will test recall on
-all 10 + re-sample these 5 to measure learning curve.
-
-**Cycle 2 (2026-05-01, webix v0.6.2)**: 7 new facts ingested
-(blink-core polling removal, host.capabilities API, service worker
-deletion, gitattributes config, test.js dedup pattern, browser-witness
-protocol, memorize scope guard). Audit sampled 5 stable AGENTS.md items
-(Blink owns surface, test.js single, xstate v5, kernel.reap, browser
-entry point). All 5 returned no recall results — rs-learn store is still
-populating. Added non-obvious caveat to AGENTS.md: blink-core overlap
-guard prevents runElf re-entrance. 0 items migrated this cycle. Store
-expected to be ready for recall migrations in Cycle 3.
-
-**Cycle 4 (2026-05-01, gh-pages deploy)**: 6 new facts ingested
-(gh-pages live URL + witness, anentrypoint-design SDK shape,
-`window.__debug` getter trap, pages workflow layout, Pages enablement
-prerequisite, witness-bootstrap base-path gotcha). Re-sampled 5 stable
-items (Blink owns surface, single test.js, xstate v5, kernel.reap,
-browser entry split) — all 5 still return no recall results. Four
-cycles in, no migrations yet; store population continues. Added new
-"gh-pages demo (docs/)" section with the two non-obvious deploy
-gotchas. 0 items migrated this cycle.
-
-**Cycle 3 (2026-05-01, webix v0.6.2 full validation)**: 6 new facts
-ingested (v0.6.2 node+bun parity, CLI verb shapes, witness register
-expectations, snapshot key shape, mprotect noise advisory, port-8765
-squatter advisory). Re-sampled the same 5 stable items from Cycle 2 —
-all 5 still return no recall results. Store population is slower than
-hoped; no migrations possible yet. Added two non-obvious caveats below
-(emscripten mprotect warnings are benign; port 8765 is squatted on dev
-box). 0 items migrated this cycle.
-
+Cycles 1-4 (2026-05-01, v0.6.1→v0.6.2) drained to rs-learn — 29 facts
+ingested, 0 migrated (store still populating; recall on the 5 stable
+sampled items returned nothing). Full per-cycle detail is in recall
+memory (`mem-1779967657135-1-897`). The non-obvious caveats those cycles
+surfaced live in their own sections below.
 
 ## Live CLI surface limits (v0.6.3 demo, witnessed 2026-05-04)
 
@@ -314,3 +282,33 @@ Other jank found + fixed, each browser-witnessed live:
 apk add/list still witnessed installing `busybox-static 1.36.1-r31`
 (4 files) after the UX copy changes, via the `window.__debug.x86_64.apk`
 contract.
+
+## Live gh-pages was BROKEN; CI asset-sync must cover the full import graph (v0.6.6, witnessed 2026-05-28)
+
+Validating the live URL `https://anentrypoint.github.io/webix/` found it
+**completely dead**: `window.__debug` was `undefined`, wasm never booted,
+because `assets/alpine-apk.js` returned **404**. `pages.yml`'s asset-sync
+copied `x86_64-witness-bootstrap.js` but not `alpine-apk.js` — and the
+bootstrap `import`s `./alpine-apk.js` (added in the v0.6.4 apk work). A 404
+on any ES-module import **aborts the whole module graph**, so the page's
+loader never ran and the entire demo was inert. The v0.6.4/0.6.5 work was
+witnessed against a *local* server (which had every file) and never
+re-witnessed against the live deploy.
+
+**Lesson: when you add an `import` to any file CI copies into `docs/assets/`,
+add the imported file to `pages.yml`'s `cp` list in the same change.** The
+sync list must cover the transitive closure of the page's module graph, not
+just the entry points. The full set the page needs:
+`x86_64-witness-bootstrap.js` → `x86_64-blink-browser.js`, `blink-core.js`,
+`alpine-apk.js`; plus runtime assets `alpine-minirootfs-x86_64.tar.gz` and
+`busybox-static.apk` (referenced by `rootfsUrl` and the `apk add` button —
+both were also missing from the cp list). `cli.js`/`display.js` are the only
+`docs/assets/*` files committed to git (gitignore exception); everything else
+is repopulated by CI from `src/`+`containers/`, so a missing `cp` line = a
+guaranteed live 404 that local witnessing cannot catch.
+
+Fix witnessed by serving the corrected `docs/` locally and asserting the
+contract: `ready:true exitCode:42 rax:3c rdi:2a apkPresent:true`,
+`failures:[]` (zero 404s), CLI `echo hi there → exit 0`, and
+`apk.addUrl(busybox-static.apk)` taking the installed list 0→1. Also fixed a
+stale `C.Status` count (`11/11`→`15/15`) the v0.6.5 sweep missed.
