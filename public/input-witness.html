@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>input-witness</title></head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+// Input device browser witness: boot the threaded blinkenlib in-browser, push
+// key/motion events via host.pushInput (the host -> guest input ring), run the
+// guest inputtest ELF which drains via syscall 0x5fc, and assert the guest saw
+// exactly the injected events. Proves the input bridge on the browser surface.
+const out = (o) => { document.getElementById("out").textContent = JSON.stringify(o); window.__witness = o; };
+try {
+  const { createBlinkHostBrowser } = await import("/src/x86_64-blink-browser.js");
+  const host = await createBlinkHostBrowser({
+    wasmUrl: "/containers/blinkenlib.wasm",
+    glueUrl: "/containers/blinkenlib.js",
+  });
+  const pushed1 = host.pushInput({ type: "key", code: 65, down: 1 });
+  host.pushInput({ type: "motion", x: 10, y: 20 });
+  const pendingBefore = host.inputPending();
+  const elfBytes = new Uint8Array(await (await fetch("/containers/inputtest.elf")).arrayBuffer());
+  const r = await host.runElf(elfBytes, { argv: ["inputtest"], progname: "/program" });
+  out({
+    ok: true,
+    pushed1,
+    pendingBefore,
+    exitCode: r.exitCode,
+    stdout: r.stdout,
+    pendingAfter: host.inputPending(),
+    firstEventOk: /type=1 code=65 value=1/.test(r.stdout),
+  });
+} catch (e) {
+  out({ ok: false, err: String(e && e.stack || e) });
+}
+</script>
+</body></html>
