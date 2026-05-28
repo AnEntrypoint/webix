@@ -45,8 +45,15 @@ export function createDisplay(canvas){
   const cols = Math.floor(canvas.width / cellW);
   const rows = Math.floor(canvas.height / cellH);
 
+  // canvas2d can't read CSS variables, so resolve the panel background from the
+  // live computed style once — keeps the canvas in sync with the active theme.
+  function bgColor(){
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--panel-2').trim();
+    return v || '#F1ECE0';
+  }
+
   function clear(){
-    ctx.fillStyle = '#FBF6EB';
+    ctx.fillStyle = bgColor();
     ctx.fillRect(0,0,canvas.width,canvas.height);
   }
 

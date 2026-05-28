@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="ds-247420" data-theme="light">
+<html lang="en" class="ds-247420">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -40,17 +40,38 @@
     .wb-cli{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;padding:2px 0}
     .wb-cli .p{color:var(--accent,#16a34a);margin-right:8px}
     .wb-term{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;background:#1F1B16;color:#FBF6EB;border-radius:8px;padding:10px 12px;height:18rem;overflow:auto;white-space:pre-wrap}
-    .wb-term .p{color:#16a34a}.wb-term .e{color:#f87171}.wb-term .x{color:#9ca3af}
+    .wb-term .p{color:#16a34a}.wb-term .e{color:var(--danger,#f87171)}.wb-term .x{color:#9ca3af}
     .wb-prompt{display:flex;align-items:center;gap:8px;margin-top:8px;font-family:'JetBrains Mono',ui-monospace,monospace}
     .wb-prompt .ps1{color:var(--accent,#16a34a);font-weight:700}
     .wb-prompt input{flex:1;background:var(--panel-2,#F1ECE0);border:1px solid var(--panel-border,#d6cfbe);border-radius:6px;padding:7px 10px;font:inherit;font-size:12.5px;color:var(--ink,#1F1B16)}
     .wb-prompt input:focus{outline:2px solid var(--accent,#16a34a);outline-offset:1px}
-    .wb-canvas{display:block;width:100%;max-width:640px;height:280px;background:#FBF6EB;border-radius:8px;border:1px solid var(--panel-border,#d6cfbe)}
+    .wb-canvas{display:block;width:100%;max-width:640px;aspect-ratio:640/280;height:auto;background:var(--panel-2,#F1ECE0);border-radius:8px;border:1px solid var(--panel-border,#d6cfbe)}
     .wb-disp-buttons{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-</style>
+    .wb-boot{max-width:1040px;margin:0 auto;padding:40px 16px;display:flex;flex-direction:column;gap:12px}
+    .wb-skel{background:var(--panel-2,#F1ECE0);border-radius:8px;position:relative;overflow:hidden}
+    .wb-skel::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);transform:translateX(-100%);animation:wb-shimmer 1.2s infinite}
+    @keyframes wb-shimmer{100%{transform:translateX(100%)}}
+    .wb-empty{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--panel-text-2,#6b7280);font-style:italic}
+  </style>
+  <script>
+    // theme: respect saved choice, else OS preference. set before paint to avoid flash.
+    (function(){
+      try{
+        var saved=localStorage.getItem('webix-theme');
+        var t=saved||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+        document.documentElement.setAttribute('data-theme',t);
+      }catch(_){ document.documentElement.setAttribute('data-theme','light') }
+    })();
+  </script>
 </head>
 <body>
-  <div id="app">loading…</div>
+  <div id="app">
+    <div class="wb-boot" aria-busy="true" aria-label="loading webix demo">
+      <div class="wb-skel" style="height:120px"></div>
+      <div class="wb-skel" style="height:220px"></div>
+      <div class="wb-skel" style="height:160px"></div>
+    </div>
+  </div>
 
   <script type="module">
     import { mount, components as C, h, installStyles } from 'anentrypoint-design';
@@ -91,6 +112,7 @@
           state.term.push(line);
           if (state.term.length > 400) state.term.splice(0, state.term.length - 400);
           render();
+          requestAnimationFrame(scrollTermToBottom);
           // mirror latest stdout into the ANSI display
           if (line.kind === 'stdout' && display) display.renderAnsi(line.text);
         },
@@ -105,6 +127,16 @@
       state.cliInput = '';
       ensureCli().submit(txt);
       render();
+      // keep the REPL fluid: refocus the prompt + pin the terminal to newest output
+      requestAnimationFrame(() => {
+        if (inputRef && !inputRef.disabled) inputRef.focus();
+        scrollTermToBottom();
+      });
+    }
+
+    function scrollTermToBottom(){
+      const term = document.getElementById('cli-term');
+      if (term) term.scrollTop = term.scrollHeight;
     }
 
     function cliKey(ev){
@@ -137,6 +169,14 @@
     }
 
     function clearTerm(){ state.term = []; ensureCli(); render() }
+
+    function toggleTheme(){
+      const de = document.documentElement;
+      const next = de.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      de.setAttribute('data-theme', next);
+      try { localStorage.setItem('webix-theme', next); } catch(_){}
+      render();
+    }
 
     const log = (m) => { state.log.push(`[${new Date().toLocaleTimeString()}] ${m}`); render() };
 
@@ -214,7 +254,7 @@
     }
 
     function regGrid(){
-      if (!state.regs) return h('div', { class: 'wb-out', style:'min-height:6.5rem' }, '(boot to populate registers)');
+      if (!state.regs) return h('div', { class: 'wb-out wb-empty', style:'min-height:6.5rem' }, 'boot the host to populate the register block');
       const order = ['rip','rax','rdi','rsi','rdx','rsp','rbp','rcx','r8','r9','r10','r11','r12','r13','r14','r15'];
       return h('div', { class: 'wb-regs' },
         ...order.map(k => h('span', null,
@@ -254,10 +294,14 @@
           h('div', { class: 'wb-grid' },
             h('div', null,
               h('div', { class: 'wb-row' }, h('b', null, 'stdout')),
-              h('div', { class: 'wb-out', id: 'demo-stdout' }, state.stdout || '(boot the host to see hi)'),
-              state.stderr ? h('div', { class: 'wb-out', style:'margin-top:6px;color:#c2410c' }, 'stderr:\n' + state.stderr) : null,
+              state.stdout
+                ? h('div', { class: 'wb-out', id: 'demo-stdout' }, state.stdout)
+                : h('div', { class: 'wb-out wb-empty', id: 'demo-stdout' }, 'boot the host — the hello ELF prints here and exits 42'),
+              state.stderr ? h('div', { class: 'wb-out', style:'margin-top:6px;color:var(--danger,#c2410c)' }, 'stderr:\n' + state.stderr) : null,
               h('div', { class: 'wb-row', style:'margin-top:8px' }, h('b', null, 'log')),
-              h('div', { class: 'wb-out' }, state.log.slice(-12).join('\n') || '(idle)')
+              state.log.length
+                ? h('div', { class: 'wb-out' }, state.log.slice(-12).join('\n'))
+                : h('div', { class: 'wb-out wb-empty' }, 'host activity will appear here')
             ),
             h('div', null,
               h('div', { class: 'wb-row' }, h('b', null, 'registers'), h('span', null, '(hex, post-exit)')),
@@ -274,19 +318,22 @@
         children: h('div', { class: 'wb-pad' },
           C.Heading({ level: 1, style: 'margin:0 0 6px 0', children: 'webix' }),
           C.Lede({ children: 'blink-backed x86_64 linux userspace, in your browser' }),
-          h('p', { style:'margin:8px 0 14px 0;color:var(--panel-text-2);max-width:64ch' },
-            '~280 lines of host code over a 240KB blink wasm that owns the cpu, mmu, ~150 linux x86_64 syscalls, and signals. this build is POSIX NOJIT NOSOCK single-threaded: sse2 only, sockets return ENOSYS. no js instruction decoder, no js syscall ABI, no js vfs — the wasm runs the metal, the host just feeds elves in and pumps registers out. install from the alpine ecosystem with js-driven apk.'),
+          h('p', { style:'margin:8px 0 10px 0;color:var(--panel-text-2);max-width:62ch;font-size:15px;line-height:1.55' },
+            '~280 lines of host code over a 240 KB blink wasm. the wasm owns the cpu, mmu, ~150 linux x86_64 syscalls, and signals — no js instruction decoder, no js syscall ABI, no js vfs. the host just feeds ELFs in and pumps registers out.'),
+          h('p', { style:'margin:0 0 14px 0;color:var(--panel-text-2);max-width:62ch;font-size:13.5px;line-height:1.5;opacity:.85' },
+            'this build is POSIX · NOJIT · NOSOCK · single-threaded: sse2 only, sockets return ENOSYS. install from the alpine ecosystem with js-driven apk — live, in this tab.'),
           h('div', { style:'display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px 0' },
-            C.Chip({ children:'11/11 tests' }),
+            C.Chip({ children:'15/15 tests' }),
             C.Chip({ children:'node + bun parity' }),
             C.Chip({ children:'browser witnessed' }),
             C.Chip({ children:'<200L per file' }),
             C.Chip({ children:'xstate v5' })
           ),
-          h('div', { style:'display:flex;gap:8px;flex-wrap:wrap' },
+          h('div', { style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center' },
             C.Btn({ href:'#demo-runner', primary:true, children:'try it live' }),
             C.Btn({ href:'https://github.com/AnEntrypoint/webix', children:'github' }),
-            C.Btn({ href:'https://www.npmjs.com/package/webix', children:'npm' })
+            C.Btn({ href:'https://www.npmjs.com/package/webix', children:'npm' }),
+            C.Btn({ onclick: toggleTheme, children: (document.documentElement.getAttribute('data-theme')==='dark'?'light mode':'dark mode') })
           )
         )
       });
@@ -304,14 +351,14 @@
 
     function featuresPanel(){
       const items = [
-        { name:'blink owns the cpu surface', desc:'~150 linux x86_64 syscalls, signals, fork/clone, mmu, AF_INET/UNIX/INET6 — all in the upstream blink wasm. no parallel js abi.', meta:'host ~280L' },
+        { name:'blink owns the cpu surface', desc:'~150 linux x86_64 syscalls, signals, the mmu, and instruction decode — all in the upstream blink wasm. no parallel js abi. this build is single-threaded and NOSOCK, so clone/pthread and AF_INET are out of scope.', meta:'host ~280L' },
         { name:'<200 lines per file',        desc:'every module under the cap. if it grows past 200L it splits before merge. forces composition over sprawl.', meta:'invariant' },
         { name:'xstate v5 actor lifecycle',  desc:'the hand-rolled xstate-lite is gone. process actors are real xstate machines with witness-able transitions.', meta:'v0.6.0+' },
-        { name:'node + bun first-class',     desc:'bun test.js passes 11/11 alongside node 23.10. file:// dynamic import + emscripten glue + wasm load all work in bun 1.3.8 unmodified.', meta:'parity' },
+        { name:'node + bun first-class',     desc:'bun test.js passes 15/15 alongside node 23.10. file:// dynamic import + emscripten glue + wasm load all work in bun 1.3.8 unmodified.', meta:'parity' },
         { name:'browser witnessed',          desc:'this page boots the same host the test suite uses. window.__debug.x86_64 is the contract — ready, exitCode, registers, stdout, runElf, snapshot.', meta:'live' },
         { name:'POSIX NOJIT NOSOCK build',   desc:'sse2 verified. avx traps SIGILL. socket(AF_INET) returns ENOSYS. pthread_create unsupported. all upstream blink build flags — fork emsdk to lift.', meta:'caveat' }
       ];
-      return C.Panel({
+      return h('div', { id: 'architecture' }, C.Panel({
         title: 'architecture',
         style: 'margin:8px',
         children: items.map((it,i)=>C.RowLink({
@@ -322,7 +369,7 @@
           meta: it.meta,
           href: '#demo-runner'
         }))
-      });
+      }));
     }
 
     function examplesPanel(){
@@ -332,6 +379,7 @@
         { name:'busybox · uname -a', desc:'real syscalls fielding utsname. linux 5.x style banner from inside the tab.', meta:'syscall' },
         { name:'busybox · expr 7 * 6', desc:'multi-arg arithmetic. answer should be 42.', meta:'argv' },
         { name:'sse2-test.elf',    desc:'verifies sse2 vector ops. avx-test.elf returns 132 on this build by design.', meta:'153 B' },
+        { name:'apk add (alpine)', desc:'js-driven apk: a .apk is a gzip tarball, decompressed and extracted into the mounted alpine minirootfs — no guest fork, pipe, or socket. try the shell panel.', meta:'pkg' },
         { name:'snapshot memory',  desc:'round-trips 17 MB of linear wasm memory + the register block. byte-exact restore is the suspend/resume primitive.', meta:'17 MB' }
       ];
       return C.Panel({
@@ -349,7 +397,7 @@
 
     function termPanel(){
       const ready = state.status === 'ready' || state.status === 'running';
-      const lines = state.term.length ? state.term : [{ kind:'x', text:'(boot the host, then type a command)' }];
+      const lines = state.term.length ? state.term : [{ kind:'x', text:'boot the host, then type a command — try: ls -la /  ·  uname -a  ·  apk list' }];
       return C.Panel({
         title: 'shell',
         style: 'margin:8px',
@@ -367,8 +415,8 @@
             btn('id',           () => window.__webixDemo.submitCliText('id'),          !ready),
             btn('expr 7 \\* 6', () => window.__webixDemo.submitCliText('expr 7 * 6'),  !ready),
             btn('--list',       () => window.__webixDemo.submitCliText('--list'),      !ready),
-            btn('apk list',     () => window.__webixDemo.submitCliText('apk list'),    !ready),
-            btn('apk add',      () => window.__webixDemo.submitCliText('apk add busybox-static.apk'), !ready),
+            btn('apk list',          () => window.__webixDemo.submitCliText('apk list'),    !ready),
+            btn('apk add busybox-static', () => window.__webixDemo.submitCliText('apk add busybox-static.apk'), !ready),
             btn('clear',        clearTerm, false)
           ),
           h('div', { class: 'wb-term', id: 'cli-term' },
