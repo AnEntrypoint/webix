@@ -319,8 +319,15 @@ jobs:
           host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
           const apk = createApk(host, { fetchImpl: fetch });
           await apk.addByName("xvfb");
+          // Real keyboard support: the core keyboard device needs a compiled XKB
+          // keymap, which requires xkbcomp + the xkeyboard-config data files.
+          // Install them so device init completes (this Xvfb has no -noxkb).
+          for (const pkg of ["xkbcomp", "xkeyboard-config"]) {
+            try { await apk.addByName(pkg); } catch(e) { console.error("apk add "+pkg+" failed:", e && e.message); }
+          }
           const FS = host.Module.FS;
           if (!FS.analyzePath("/usr/bin/Xvfb").exists) { console.error("Xvfb not installed"); process.exit(1); }
+          console.log("X-smoke: xkbcomp present:", FS.analyzePath("/usr/bin/xkbcomp").exists);
           // Swap the mesa-backed libGL (and its giant LLVM deps) for the stub so
           // Xvfb never maps the 153MB LLVM. Overwrite libGL.so.1; drop LLVM/gallium.
           const stub = fs.readFileSync("containers/libGL-stub.so");
@@ -345,14 +352,10 @@ jobs:
           // must exist or bind() fails ("Unable to open socket for unix"). Create
           // it up front. (The "local" transport is a no-op on Linux Xtrans.)
           try { FS.mkdir("/tmp/.X11-unix"); } catch(e) {}
-          // -noxkb: skip XKB keymap compilation. xkbcomp + xkeyboard-config
-          // aren't in the minimal rootfs, so the core keyboard can't init and
-          // the server aborts. The in-page desktop has no physical keyboard
-          // (input is synthesized via the 0x5fc ring), so -noxkb is correct.
-          console.log("X-smoke: Xvfb +stub libGL ("+stub.length+"B stub), exec ':99 -screen 0 640x480x16 -ac -noreset -nolock -noxkb' ...");
+          console.log("X-smoke: Xvfb +stub libGL ("+stub.length+"B stub), exec ':99 -screen 0 640x480x16 -ac -noreset -nolock' ...");
           let timedOut = false;
           const r = await Promise.race([
-            host.runElf(bytes, { progname: "/usr/bin/Xvfb", argv: ["Xvfb", ":99", "-screen", "0", "640x480x16", "-ac", "-noreset", "-nolock", "-noxkb"] }),
+            host.runElf(bytes, { progname: "/usr/bin/Xvfb", argv: ["Xvfb", ":99", "-screen", "0", "640x480x16", "-ac", "-noreset", "-nolock"] }),
             new Promise((res) => setTimeout(() => { timedOut = true; res({ exitCode: "TIMEOUT(serving)", stdout: "", stderr: "" }); }, 30000)),
           ]);
           console.log("X-smoke EXIT:", r.exitCode);
@@ -360,17 +363,16 @@ jobs:
           console.log("X-smoke stderr:", JSON.stringify((r.stderr||"").slice(-3000)));
           const out = (r.stdout||"") + (r.stderr||"");
           if (/Cannot enlarge memory/.test(out)) { console.error("X-smoke: STILL OOM (stub did not avoid LLVM)"); process.exit(2); }
-          // A still-failing listener is NOT success — match the explicit fatal.
-          const sockFail = /Cannot establish any listening sockets|failed to open listener|Unable to open socket/i.test(out);
-          // Genuine post-transport witness: the server logged extension/screen
-          // init or kept running (timeout = it's in the dispatch loop serving).
-          const serving = timedOut || /Initializing built-in extension|MIT-SHM|RANDR|XINERAMA|reset generation|Screen \d+ added/i.test(out);
-          if (serving && !sockFail) {
-            console.log("X-smoke RESULT: SUCCESS — real Xvfb X server reached the dispatch loop under blink (stub libGL, epoll shim, -nolock)");
-          } else if (sockFail) {
-            console.log("X-smoke RESULT: PROGRESS — Xvfb ran past LLVM/epoll/lock into transport setup; listener open still fails. exit="+r.exitCode);
+          // Any Fatal server error / unrecognized-option usage dump is failure,
+          // even though the usage text contains words like RANDR/MIT-SHM.
+          const hardFail = /Fatal server error|Unrecognized option|Cannot establish any listening sockets|failed to open listener|Unable to open socket/i.test(out);
+          // Genuine post-init witness: server kept running to the timeout (it's
+          // in the dispatch loop serving) — the only reliable "serving" signal.
+          const serving = timedOut && !hardFail;
+          if (serving) {
+            console.log("X-smoke RESULT: SUCCESS — real Xvfb X server reached the dispatch loop under blink (stub libGL, epoll shim, in-proc AF_UNIX, -nolock)");
           } else {
-            console.log("X-smoke RESULT: Xvfb main ran (no LLVM OOM), exit="+r.exitCode+" out indicates: "+out.slice(0,160));
+            console.log("X-smoke RESULT: PROGRESS — Xvfb ran (no LLVM OOM) but did not reach the dispatch loop. exit="+r.exitCode+" tail: "+out.slice(-200));
           }
           EOF
 
