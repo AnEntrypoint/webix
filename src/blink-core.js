@@ -167,13 +167,38 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       generation:Module._blinkenlib_get_fb_generation(),
     };
   }
-  // Return a fresh Uint8ClampedArray view over the guest framebuffer. Must be
-  // re-derived each frame: ALLOW_MEMORY_GROWTH detaches the old ArrayBuffer.
+  // Reusable output buffer for the page-assembled framebuffer copy.
+  let fbCopyBuf=null;
+  // Return the guest framebuffer pixels as a contiguous Uint8ClampedArray.
+  //
+  // IMPORTANT: blink's SpyAddress (memory.c LookupAddress2) returns a host
+  // pointer valid only for the 4096-byte PAGE containing the queried vaddr --
+  // guest pages map to arbitrary, non-contiguous host pages. A single
+  // spy_address(fb_vaddr) is therefore valid for just the first 4KB; reading
+  // stride*height contiguously past that returns unrelated host memory (this
+  // was the "framebuffer goes black past the first page" bug). So we COPY the
+  // framebuffer page-by-page: for each 4KB span we re-query spy_address to get
+  // that page's host pointer and copy it into a contiguous output buffer.
   function fbView(){
     const info=fbInfo(); if(!info) return null;
-    const host=Module._blinkenlib_get_fb_ptr(); if(!host) return null;
+    const vaddr=Module._blinkenlib_get_fb_vaddr(); // u64; may arrive signed
+    // normalize a possibly-signed 32-bit marshalled vaddr to unsigned
+    const base=vaddr<0?vaddr>>>0:vaddr;
+    if(!base) return null;
     const len=info.stride*info.height;
-    return { ...info, pixels:new Uint8ClampedArray(memBuffer(Module),host,len) };
+    if(!fbCopyBuf||fbCopyBuf.length!==len) fbCopyBuf=new Uint8ClampedArray(len);
+    const PAGE=4096;
+    let off=0;
+    while(off<len){
+      const host=Module._blinkenlib_spy_address(base+off);
+      const chunk=Math.min(PAGE-((base+off)&(PAGE-1)), len-off);
+      if(host){
+        const src=new Uint8Array(memBuffer(Module), host, chunk);
+        fbCopyBuf.set(src, off);
+      } // unmapped page -> leave as-is (transparent/previous)
+      off+=chunk;
+    }
+    return { ...info, pixels:fbCopyBuf };
   }
   // Host -> guest input. Maps display.js's event shape to the C input device
   // (blinkenlib_push_input(type, code, x, y, value)). type: 1=key 2=motion
