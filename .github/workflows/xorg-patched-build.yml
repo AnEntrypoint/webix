@@ -132,12 +132,17 @@ jobs:
         run: |
           set -eux
           git config --global --add safe.directory '*'
-          cd "$GITHUB_WORKSPACE"
-          pwd; ls -la .git 2>&1 | head -1 || true
           git config --global user.email "ci@webix"
           git config --global user.name "webix-ci"
-          git add containers/Xvfb-patched containers/server.xkm
-          git commit -m "xorg: GL-less Xvfb-patched (no-fork keymap) + precompiled server.xkm" || echo "no changes"
           R="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push "$R" HEAD:main \
-            || (git pull --rebase "$R" main && git push "$R" HEAD:main)
+          # actions/checkout in a minimal alpine container may leave no usable
+          # .git; fresh-clone a shallow copy, drop the built artifacts in, push.
+          rm -rf /tmp/pushrepo
+          git clone --depth 1 "$R" /tmp/pushrepo
+          mkdir -p /tmp/pushrepo/containers
+          cp containers/Xvfb-patched /tmp/pushrepo/containers/Xvfb-patched
+          cp containers/server.xkm   /tmp/pushrepo/containers/server.xkm
+          cd /tmp/pushrepo
+          git add containers/Xvfb-patched containers/server.xkm
+          git commit -m "xorg: GL-less Xvfb-patched (no-fork keymap) + precompiled server.xkm" || { echo "no changes"; exit 0; }
+          git push "$R" HEAD:main
