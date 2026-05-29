@@ -125,16 +125,12 @@ jobs:
           sed -i 's@^#define DISABLE_SOCKETS@// #define DISABLE_SOCKETS@' "$CFG"
           sed -i 's@^#define DISABLE_NONPOSIX@// #define DISABLE_NONPOSIX@' "$CFG"
           # Uncomment the HAVE_* that emscripten's musl libc genuinely provides.
-          # HAVE_FORK is force-enabled so the fork/vfork/wait4 syscalls REGISTER:
-          # blink's in-VM synchronous fork+exec (syscall.c, __EMSCRIPTEN__) needs
-          # wait4(0x3D) registered to reap the child, and routes clone/fork/vfork
-          # to its own path that never calls host fork(). Without HAVE_FORK, wait4
-          # is unregistered -> Popen's Pclose fails -> Xvfb keymap compile fails.
-          sed -i 's@^// #define HAVE_FORK\$@#define HAVE_FORK@' "$CFG"
-          sed -i 's@^#define DISABLE_FORK@// #define DISABLE_FORK@' "$CFG"
-          # Defensive: if the probe left no HAVE_FORK line at all, add one.
-          grep -qE '^#define HAVE_FORK' "$CFG" || echo '#define HAVE_FORK' >> "$CFG"
-          # (NOT process-shared pthread mutexes.)
+          # (HAVE_FORK is deliberately LEFT OFF: enabling it regressed Xvfb to a
+          # silent early exit 127 — Xorg changes startup behavior when it thinks
+          # fork works. blink registers clone(0x38) under HAVE_THREADS already, and
+          # wait4(0x3D) is registered unconditionally under __EMSCRIPTEN__ in
+          # syscall.c so the in-VM fork+exec path reaps its child without the
+          # HAVE_FORK-induced Xvfb regression. NOT process-shared pthread mutexes.)
           # NOTE: do NOT enable HAVE_GETRANDOM or HAVE_SYSINFO -- emscripten's
           # musl does not export getrandom()/sysinfo() as linkable symbols, so
           # enabling them makes wasm-ld fail with "undefined symbol: getrandom /
