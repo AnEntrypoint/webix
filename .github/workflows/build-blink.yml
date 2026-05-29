@@ -57,7 +57,7 @@ jobs:
           # branch so the JS host can map the guest framebuffer zero-copy.
           # (They are EMSCRIPTEN_KEEPALIVE too, but listing them here is robust
           # against dead-code elimination at -O levels.)
-          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_blinkenlib_push_input","_blinkenlib_input_pending","_blinkenlib_vm_current","_blinkenlib_vm_set","_blinkenlib_vm_spawn","_main"'
+          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_blinkenlib_push_input","_blinkenlib_input_pending","_blinkenlib_vm_current","_blinkenlib_vm_set","_blinkenlib_vm_spawn","_blinkenlib_continue","_main"'
           # Pthreads are required for Blink's fork()/clone()/futex emulation and
           # for real guest threads (emscripten implements fork via web workers +
           # SharedArrayBuffer). Without -pthread the configure probe reports

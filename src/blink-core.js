@@ -351,7 +351,11 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       // LoadProgram opens `progname` as the file — so progname must BE the path.
       spawn("server","/xserver",["Xvfb",...serverArgv]);
       // Kick the server's first slice (run to first preempt) then it's paused.
-      const runSlice=(name)=>{ setActive(name); pendingPreempt=false; try{ if(vms[name].started){ Module._blinkenlib_preempt_resume(); } else { vms[name].started=true; Module._blinkenlib_run(); } }catch(e){ vms[name].done=true; vms[name].code=255; } };
+      // First slice uses _blinkenlib_continue (runs the ALREADY-loaded program
+      // via runLoop) — NOT _blinkenlib_run, which re-does setupProgram (TearDown
+      // + reload) and would clobber the freshly vm_spawn'd VM. Subsequent slices
+      // resume from the preempt.
+      const runSlice=(name)=>{ setActive(name); pendingPreempt=false; try{ if(vms[name].started){ Module._blinkenlib_preempt_resume(); } else { vms[name].started=true; Module._blinkenlib_continue(); } }catch(e){ vms[name].done=true; vms[name].code=255; } };
       const clientDone=new Promise((resolve)=>{
         const t0=Date.now();
         let clientSpawned=false;
