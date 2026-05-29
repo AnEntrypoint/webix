@@ -502,10 +502,10 @@ jobs:
             { serverArgv: [":99","-screen","0","640x480x16","-ac","-noreset","-nolock"],
               clientProgname: clientPath,
               clientArgv: clientPath.endsWith("xdpyinfo") ? ["-display",":99"] : ["-display",":99","-solid","blue"],
-              clientDelayMs: 12000, overallTimeoutMs: 50000 });
+              clientDelayMs: 6000, overallTimeoutMs: 120000 });
           console.log("XC-smoke server exit:", r.server.exitCode);
           for (const sl of [0,1]) { try { console.log("XC-smoke thr-"+sl+":", FS.readFile("/em-thr-"+sl+".run",{encoding:"utf8"}).trim()); } catch(e){ console.log("XC-smoke thr-"+sl+": (never started)"); } }
-          try { console.log("XC-smoke unixsock.log:\n"+FS.readFile("/em-unixsock.log",{encoding:"utf8"})); } catch(e){ console.log("XC-smoke unixsock.log: (none)"); }
+          try { const ul=FS.readFile("/em-unixsock.log",{encoding:"utf8"}); const ull=ul.split("\n"); console.log("XC-smoke unixsock.log ("+ull.length+" lines, tail):\n"+ull.slice(-40).join("\n")); } catch(e){ console.log("XC-smoke unixsock.log: (none)"); }
           console.log("XC-smoke server stdout:", JSON.stringify((r.server.stdout||"").slice(0,3500)));
           { const se=r.server.stderr||"";
             const epollHits=(se.match(/\[epoll\] wait/g)||[]).length;
