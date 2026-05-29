@@ -530,28 +530,12 @@ jobs:
           const host = await createBlinkHost({});
           host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
           const FS = host.Module.FS;
-          // Extract the overlay host-side into the guest MEMFS (node tar-less:
-          // use a minimal gz+tar walk via zlib + a tiny ustar parser).
-          const tar = zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz"));
-          let off = 0;
-          const mkdirp = (p) => { const parts=p.split("/").filter(Boolean); let cur=""; for (const s of parts){ cur+="/"+s; try{FS.mkdir(cur);}catch(e){} } };
-          while (off + 512 <= tar.length) {
-            const name = Buffer.from(tar.subarray(off, off+100)).toString("utf8").replace(/\0.*$/,"");
-            if (!name) break;
-            const sz = parseInt(Buffer.from(tar.subarray(off+124, off+124+11)).toString("utf8").replace(/\0.*$/,"").trim()||"0", 8);
-            const type = String.fromCharCode(tar[off+156]);
-            const data = tar.subarray(off+512, off+512+sz);
-            const guestPath = "/" + name.replace(/^\.?\//,"");
-            if (type === "5") { mkdirp(guestPath); }
-            else if (type === "0" || type === "\0" || type === "") {
-              mkdirp(guestPath.replace(/\/[^/]*$/,""));
-              try { FS.writeFile(guestPath, new Uint8Array(data)); FS.chmod(guestPath, 0o755); } catch(e) { console.error("write",guestPath,e&&e.message); }
-            } else if (type === "2") {
-              const link = Buffer.from(tar.subarray(off+157, off+157+100)).toString("utf8").replace(/\0.*$/,"");
-              try { FS.symlink(link, guestPath); } catch(e) {}
-            }
-            off += 512 + Math.ceil(sz/512)*512;
-          }
+          // Extract the overlay with the guest's OWN busybox tar — exactly the
+          // product path (sandcastle runs `tar -xzf` in-guest). This preserves
+          // perms + symlinks the way the running musl loader expects.
+          FS.writeFile("/x-client-overlay.tar.gz", new Uint8Array(fs.readFileSync("containers/x-client-overlay.tar.gz")));
+          const ex = await host.runElf(FS.readFile("/bin/busybox"), { argv:["tar","-xzf","/x-client-overlay.tar.gz","-C","/"], path:"/bin/busybox" });
+          console.log("XO-smoke overlay extract exit:", ex.exitCode, JSON.stringify((ex.stderr||"").slice(0,300)));
           FS.writeFile("/usr/bin/Xvfb", fs.readFileSync("containers/Xvfb-patched")); try { FS.chmod("/usr/bin/Xvfb",0o755); } catch(e) {}
           const xkm = fs.readFileSync("containers/server.xkm");
           try { FS.mkdir("/tmp"); } catch(e) {}
