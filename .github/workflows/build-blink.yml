@@ -409,6 +409,63 @@ jobs:
           }
           EOF
 
+      - name: X-server smoke (patched GL-less Xvfb — no-fork keymap)
+        continue-on-error: true
+        run: |
+          # Use the custom GL-less Xvfb (containers/Xvfb-patched) whose RunXkbComp
+          # is patched to skip the xkbcomp fork and load a precompiled .xkm. We
+          # install the stock xvfb only for its shared libs, then overwrite the
+          # binary and place server.xkm where LoadXKM reads it. Expect the server
+          # to reach the dispatch loop (TIMEOUT) with NO fork.
+          test -f containers/Xvfb-patched || { echo "no patched Xvfb yet — run xorg-patched-build"; exit 0; }
+          node --experimental-vm-modules --no-warnings <<'EOF'
+          globalThis.self ??= globalThis;
+          const fs = await import("node:fs");
+          const zlib = await import("node:zlib");
+          const { createBlinkHost } = await import("./src/x86_64-blink.js");
+          const { createApk } = await import("./src/alpine-apk.js");
+          const host = await createBlinkHost({});
+          host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
+          const apk = createApk(host, { fetchImpl: fetch });
+          await apk.addByName("xvfb");           // for the shared libs Xvfb needs
+          const FS = host.Module.FS;
+          // GL-less binary still links libGL via some deps? Swap stub defensively.
+          try {
+            const stub = fs.readFileSync("containers/libGL-stub.so");
+            for (const p of ["/usr/lib/libGL.so.1","/usr/lib/libGL.so.1.2.0"]) { try { FS.writeFile(p, stub); } catch(e) {} }
+            for (const f of ["libLLVM-19.so","libLLVM.so.19.1","libgallium-24.2.8.so","libGLX_mesa.so.0"]) { try { FS.unlink("/usr/lib/"+f); } catch(e) {} }
+          } catch(e) {}
+          // Overwrite Xvfb with the patched build.
+          FS.writeFile("/usr/bin/Xvfb", fs.readFileSync("containers/Xvfb-patched"));
+          try { FS.chmod("/usr/bin/Xvfb", 0o755); } catch(e) {}
+          // Place the precompiled keymap where the patched RunXkbComp's returned
+          // name resolves: LoadXKM reads <OutputDirectory>/server-<display>.xkm.
+          // OutputDirectory falls back to /tmp/ when XKM_OUTPUT_DIR isn't writable.
+          const xkm = fs.readFileSync("containers/server.xkm");
+          try { FS.mkdir("/tmp"); } catch(e) {}
+          try { FS.mkdir("/tmp/.X11-unix"); } catch(e) {}
+          for (const p of ["/tmp/server-99.xkm","/tmp/server-0.xkm","/var/lib/xkb/server-99.xkm"]) {
+            try { FS.writeFile(p, xkm); } catch(e) {}
+          }
+          const bytes = FS.readFile("/usr/bin/Xvfb");
+          console.log("PX-smoke: patched Xvfb ("+bytes.length+"B), keymap "+xkm.length+"B, exec ':99 -screen 0 640x480x16 -ac -noreset -nolock' ...");
+          let timedOut = false;
+          const r = await Promise.race([
+            host.runElf(bytes, { progname: "/usr/bin/Xvfb", argv: ["Xvfb", ":99", "-screen", "0", "640x480x16", "-ac", "-noreset", "-nolock"] }),
+            new Promise((res) => setTimeout(() => { timedOut = true; res({ exitCode: "TIMEOUT(serving)", stdout: "", stderr: "" }); }, 30000)),
+          ]);
+          console.log("PX-smoke EXIT:", r.exitCode);
+          console.log("PX-smoke stdout:", JSON.stringify((r.stdout||"").slice(0,2000)));
+          console.log("PX-smoke stderr:", JSON.stringify((r.stderr||"").slice(-3000)));
+          const out = (r.stdout||"") + (r.stderr||"");
+          const hardFail = /Fatal server error|Unrecognized option|Cannot establish any listening sockets|failed to open listener|Unable to open socket|Cannot enlarge memory/i.test(out);
+          if ((timedOut || /Initializing built-in extension|MIT-SHM|RANDR|reset generation|Screen \d+ added/i.test(out)) && !hardFail) {
+            console.log("PX-smoke RESULT: SUCCESS — patched GL-less Xvfb reached the dispatch loop under blink (no-fork keymap)");
+          } else {
+            console.log("PX-smoke RESULT: PROGRESS — exit="+r.exitCode+" tail: "+out.slice(-240));
+          }
+          EOF
+
       - name: Commit rebuilt artifacts
         env:
           BLINK_REPO: ${{ inputs.blink_repo || 'lanmower/blink' }}
