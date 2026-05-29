@@ -125,8 +125,16 @@ jobs:
           sed -i 's@^#define DISABLE_SOCKETS@// #define DISABLE_SOCKETS@' "$CFG"
           sed -i 's@^#define DISABLE_NONPOSIX@// #define DISABLE_NONPOSIX@' "$CFG"
           # Uncomment the HAVE_* that emscripten's musl libc genuinely provides.
-          # (NOT HAVE_FORK: emscripten has no real fork(); leaving it off keeps
-          # Blink on its no-fork path. NOT process-shared pthread mutexes.)
+          # HAVE_FORK is force-enabled so the fork/vfork/wait4 syscalls REGISTER:
+          # blink's in-VM synchronous fork+exec (syscall.c, __EMSCRIPTEN__) needs
+          # wait4(0x3D) registered to reap the child, and routes clone/fork/vfork
+          # to its own path that never calls host fork(). Without HAVE_FORK, wait4
+          # is unregistered -> Popen's Pclose fails -> Xvfb keymap compile fails.
+          sed -i 's@^// #define HAVE_FORK\$@#define HAVE_FORK@' "$CFG"
+          sed -i 's@^#define DISABLE_FORK@// #define DISABLE_FORK@' "$CFG"
+          # Defensive: if the probe left no HAVE_FORK line at all, add one.
+          grep -qE '^#define HAVE_FORK' "$CFG" || echo '#define HAVE_FORK' >> "$CFG"
+          # (NOT process-shared pthread mutexes.)
           # NOTE: do NOT enable HAVE_GETRANDOM or HAVE_SYSINFO -- emscripten's
           # musl does not export getrandom()/sysinfo() as linkable symbols, so
           # enabling them makes wasm-ld fail with "undefined symbol: getrandom /
