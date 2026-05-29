@@ -84,11 +84,10 @@ jobs:
           # memory", exit 250). A big guest mmap/malloc (Xorg/Xvfb) then gets a
           # recoverable failure that blink/musl degrade from, instead of killing
           # the VM. Pairs with the blink-side Mmap headroom guard (map.c).
-          # -sASSERTIONS=2 makes emscripten print a stack trace when a runtime
-          # check fails (incl. the "Cannot enlarge memory" abort), revealing the
-          # exact C caller of the ~4GB X-server allocation. (Diagnostic; it costs
-          # some size/speed so it can come back out once the caller is found.)
-          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sABORTING_MALLOC=0 -sASSERTIONS=2 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS -lnodefs.js -lidbfs.js"
+          # (ASSERTIONS=2 diagnostic removed — it revealed the X-server abort is a
+          # steady ~100MB/step heap-grow LOOP to 4GB, i.e. an allocator retry loop
+          # from the mprotect ENOSYS, now fixed strong-side in blink@fa93e25.)
+          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sABORTING_MALLOC=0 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS -lnodefs.js -lidbfs.js"
           # -pthread also has to reach the C compiler (not just the linker) so
           # threading intrinsics and the pthread headers are wired in.
           export CFLAGS="-pthread"
