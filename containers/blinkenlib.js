@@ -639,7 +639,7 @@ if (!ENVIRONMENT_IS_PTHREAD) {
       // https://github.com/emscripten-core/emscripten/issues/14130
       // And in the pthreads case we definitely need to emit a maximum. So
       // always emit one.
-      "maximum": 32768,
+      "maximum": 65536,
       "shared": true
     });
   }
@@ -661,10 +661,10 @@ function writeStackCookie() {
   // The stack grow downwards towards _emscripten_stack_get_end.
   // We write cookies to the final two words in the stack and detect if they are
   // ever overwritten.
-  GROWABLE_HEAP_U32()[((max) >> 2)] = 34821223;
-  GROWABLE_HEAP_U32()[(((max) + (4)) >> 2)] = 2310721022;
+  GROWABLE_HEAP_U32()[((max) >>> 2) >>> 0] = 34821223;
+  GROWABLE_HEAP_U32()[(((max) + (4)) >>> 2) >>> 0] = 2310721022;
   // Also test the global address 0 for integrity.
-  GROWABLE_HEAP_U32()[((0) >> 2)] = 1668509029;
+  GROWABLE_HEAP_U32()[((0) >>> 2) >>> 0] = 1668509029;
 }
 
 function checkStackCookie() {
@@ -674,13 +674,13 @@ function checkStackCookie() {
   if (max == 0) {
     max += 4;
   }
-  var cookie1 = GROWABLE_HEAP_U32()[((max) >> 2)];
-  var cookie2 = GROWABLE_HEAP_U32()[(((max) + (4)) >> 2)];
+  var cookie1 = GROWABLE_HEAP_U32()[((max) >>> 2) >>> 0];
+  var cookie2 = GROWABLE_HEAP_U32()[(((max) + (4)) >>> 2) >>> 0];
   if (cookie1 != 34821223 || cookie2 != 2310721022) {
     abort(`Stack overflow! Stack cookie has been overwritten at ${ptrToString(max)}, expected hex dwords 0x89BACDFE and 0x2135467, but received ${ptrToString(cookie2)} ${ptrToString(cookie1)}`);
   }
   // Also test the global address 0 for integrity.
-  if (GROWABLE_HEAP_U32()[((0) >> 2)] != 1668509029) /* 'emsc' */ {
+  if (GROWABLE_HEAP_U32()[((0) >>> 2) >>> 0] != 1668509029) /* 'emsc' */ {
     abort("Runtime error: The application has corrupted its heap memory area (address zero)!");
   }
 }
@@ -1004,6 +1004,7 @@ function createWasm() {
   // performing other necessary setup
   /** @param {WebAssembly.Module=} module*/ function receiveInstance(instance, module) {
     wasmExports = instance.exports;
+    wasmExports = applySignatureConversions(wasmExports);
     Module["wasmExports"] = wasmExports;
     registerTLSInit(wasmExports["_emscripten_tls_init"]);
     wasmTable = wasmExports["__indirect_function_table"];
@@ -1268,10 +1269,10 @@ var convertI32PairToI53Checked = (lo, hi) => {
   var serializedNumCallArgs = callArgs.length;
   var sp = stackSave();
   var args = stackAlloc(serializedNumCallArgs * 8);
-  var b = ((args) >> 3);
+  var b = ((args) >>> 3);
   for (var i = 0; i < callArgs.length; i++) {
     var arg = callArgs[i];
-    GROWABLE_HEAP_F64()[b + i] = arg;
+    GROWABLE_HEAP_F64()[b + i >>> 0] = arg;
   }
   var rtn = __emscripten_run_on_main_thread_js(funcIndex, emAsmAddr, serializedNumCallArgs, args, sync);
   stackRestore(sp);
@@ -1338,8 +1339,6 @@ var _exit = exitJS;
 
 var ptrToString = ptr => {
   assert(typeof ptr === "number");
-  // With CAN_ADDRESS_2GB or MEMORY64, pointers are already unsigned.
-  ptr >>>= 0;
   return "0x" + ptr.toString(16).padStart(8, "0");
 };
 
@@ -1557,8 +1556,8 @@ var establishStackSpace = pthread_ptr => {
   // If memory growth is enabled, the memory views may have gotten out of date,
   // so resync them before accessing the pthread ptr below.
   updateMemoryViews();
-  var stackHigh = GROWABLE_HEAP_U32()[(((pthread_ptr) + (52)) >> 2)];
-  var stackSize = GROWABLE_HEAP_U32()[(((pthread_ptr) + (56)) >> 2)];
+  var stackHigh = GROWABLE_HEAP_U32()[(((pthread_ptr) + (52)) >>> 2) >>> 0];
+  var stackSize = GROWABLE_HEAP_U32()[(((pthread_ptr) + (56)) >>> 2) >>> 0];
   var stackLow = stackHigh - stackSize;
   assert(stackHigh != 0);
   assert(stackLow != 0);
@@ -1580,28 +1579,28 @@ var establishStackSpace = pthread_ptr => {
   if (type.endsWith("*")) type = "*";
   switch (type) {
    case "i1":
-    return GROWABLE_HEAP_I8()[ptr];
+    return GROWABLE_HEAP_I8()[ptr >>> 0];
 
    case "i8":
-    return GROWABLE_HEAP_I8()[ptr];
+    return GROWABLE_HEAP_I8()[ptr >>> 0];
 
    case "i16":
-    return GROWABLE_HEAP_I16()[((ptr) >> 1)];
+    return GROWABLE_HEAP_I16()[((ptr) >>> 1) >>> 0];
 
    case "i32":
-    return GROWABLE_HEAP_I32()[((ptr) >> 2)];
+    return GROWABLE_HEAP_I32()[((ptr) >>> 2) >>> 0];
 
    case "i64":
     abort("to do getValue(i64) use WASM_BIGINT");
 
    case "float":
-    return GROWABLE_HEAP_F32()[((ptr) >> 2)];
+    return GROWABLE_HEAP_F32()[((ptr) >>> 2) >>> 0];
 
    case "double":
-    return GROWABLE_HEAP_F64()[((ptr) >> 3)];
+    return GROWABLE_HEAP_F64()[((ptr) >>> 3) >>> 0];
 
    case "*":
-    return GROWABLE_HEAP_U32()[((ptr) >> 2)];
+    return GROWABLE_HEAP_U32()[((ptr) >>> 2) >>> 0];
 
    default:
     abort(`invalid type for getValue: ${type}`);
@@ -1667,34 +1666,34 @@ var registerTLSInit = tlsInitFunc => PThread.tlsInitFunctions.push(tlsInitFunc);
   if (type.endsWith("*")) type = "*";
   switch (type) {
    case "i1":
-    GROWABLE_HEAP_I8()[ptr] = value;
+    GROWABLE_HEAP_I8()[ptr >>> 0] = value;
     break;
 
    case "i8":
-    GROWABLE_HEAP_I8()[ptr] = value;
+    GROWABLE_HEAP_I8()[ptr >>> 0] = value;
     break;
 
    case "i16":
-    GROWABLE_HEAP_I16()[((ptr) >> 1)] = value;
+    GROWABLE_HEAP_I16()[((ptr) >>> 1) >>> 0] = value;
     break;
 
    case "i32":
-    GROWABLE_HEAP_I32()[((ptr) >> 2)] = value;
+    GROWABLE_HEAP_I32()[((ptr) >>> 2) >>> 0] = value;
     break;
 
    case "i64":
     abort("to do setValue(i64) use WASM_BIGINT");
 
    case "float":
-    GROWABLE_HEAP_F32()[((ptr) >> 2)] = value;
+    GROWABLE_HEAP_F32()[((ptr) >>> 2) >>> 0] = value;
     break;
 
    case "double":
-    GROWABLE_HEAP_F64()[((ptr) >> 3)] = value;
+    GROWABLE_HEAP_F64()[((ptr) >>> 3) >>> 0] = value;
     break;
 
    case "*":
-    GROWABLE_HEAP_U32()[((ptr) >> 2)] = value;
+    GROWABLE_HEAP_U32()[((ptr) >>> 2) >>> 0] = value;
     break;
 
    default:
@@ -1722,6 +1721,7 @@ var UTF8Decoder = typeof TextDecoder != "undefined" ? new TextDecoder : undefine
      * @param {number=} maxBytesToRead
      * @return {string}
      */ var UTF8ArrayToString = (heapOrArray, idx = 0, maxBytesToRead = NaN) => {
+  idx >>>= 0;
   var endIdx = idx + maxBytesToRead;
   var endPtr = idx;
   // TextDecoder needs to know the byte length in advance, it doesn't stop on
@@ -1784,14 +1784,21 @@ var UTF8Decoder = typeof TextDecoder != "undefined" ? new TextDecoder : undefine
      * @return {string}
      */ var UTF8ToString = (ptr, maxBytesToRead) => {
   assert(typeof ptr == "number", `UTF8ToString expects a number (got ${typeof ptr})`);
+  ptr >>>= 0;
   return ptr ? UTF8ArrayToString(GROWABLE_HEAP_U8(), ptr, maxBytesToRead) : "";
 };
 
-var ___assert_fail = (condition, filename, line, func) => {
+function ___assert_fail(condition, filename, line, func) {
+  condition >>>= 0;
+  filename >>>= 0;
+  func >>>= 0;
   abort(`Assertion failed: ${UTF8ToString(condition)}, at: ` + [ filename ? UTF8ToString(filename) : "unknown filename", line, func ? UTF8ToString(func) : "unknown function" ]);
-};
+}
 
-var ___call_sighandler = (fp, sig) => getWasmTableEntry(fp)(sig);
+function ___call_sighandler(fp, sig) {
+  fp >>>= 0;
+  return getWasmTableEntry(fp)(sig);
+}
 
 function pthreadCreateProxied(pthread_ptr, attr, startRoutine, arg) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(2, 0, 1, pthread_ptr, attr, startRoutine, arg);
@@ -1800,7 +1807,11 @@ function pthreadCreateProxied(pthread_ptr, attr, startRoutine, arg) {
 
 var _emscripten_has_threading_support = () => typeof SharedArrayBuffer != "undefined";
 
-var ___pthread_create_js = (pthread_ptr, attr, startRoutine, arg) => {
+function ___pthread_create_js(pthread_ptr, attr, startRoutine, arg) {
+  pthread_ptr >>>= 0;
+  attr >>>= 0;
+  startRoutine >>>= 0;
+  arg >>>= 0;
   if (!_emscripten_has_threading_support()) {
     dbg("pthread_create: environment does not support SharedArrayBuffer, pthreads are not available");
     return 6;
@@ -1836,7 +1847,7 @@ var ___pthread_create_js = (pthread_ptr, attr, startRoutine, arg) => {
   // We are the main thread, so we have the pthread warmup pool in this
   // thread and can fire off JS thread creation directly ourselves.
   return spawnThread(threadParams);
-};
+}
 
 var initRandomFill = () => {
   if (typeof crypto == "object" && typeof crypto["getRandomValues"] == "function") {
@@ -2013,6 +2024,7 @@ var lengthBytesUTF8 = str => {
 };
 
 var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
+  outIdx >>>= 0;
   assert(typeof str === "string", `stringToUTF8Array expects a string (got ${typeof str})`);
   // Parameter maxBytesToWrite is not optional. Negative values, 0, null,
   // undefined and false each don't write out any bytes.
@@ -2036,27 +2048,27 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
     }
     if (u <= 127) {
       if (outIdx >= endIdx) break;
-      heap[outIdx++] = u;
+      heap[outIdx++ >>> 0] = u;
     } else if (u <= 2047) {
       if (outIdx + 1 >= endIdx) break;
-      heap[outIdx++] = 192 | (u >> 6);
-      heap[outIdx++] = 128 | (u & 63);
+      heap[outIdx++ >>> 0] = 192 | (u >> 6);
+      heap[outIdx++ >>> 0] = 128 | (u & 63);
     } else if (u <= 65535) {
       if (outIdx + 2 >= endIdx) break;
-      heap[outIdx++] = 224 | (u >> 12);
-      heap[outIdx++] = 128 | ((u >> 6) & 63);
-      heap[outIdx++] = 128 | (u & 63);
+      heap[outIdx++ >>> 0] = 224 | (u >> 12);
+      heap[outIdx++ >>> 0] = 128 | ((u >> 6) & 63);
+      heap[outIdx++ >>> 0] = 128 | (u & 63);
     } else {
       if (outIdx + 3 >= endIdx) break;
       if (u > 1114111) warnOnce("Invalid Unicode code point " + ptrToString(u) + " encountered when serializing a JS string to a UTF-8 string in wasm memory! (Valid unicode code points should be in range 0-0x10FFFF).");
-      heap[outIdx++] = 240 | (u >> 18);
-      heap[outIdx++] = 128 | ((u >> 12) & 63);
-      heap[outIdx++] = 128 | ((u >> 6) & 63);
-      heap[outIdx++] = 128 | (u & 63);
+      heap[outIdx++ >>> 0] = 240 | (u >> 18);
+      heap[outIdx++ >>> 0] = 128 | ((u >> 12) & 63);
+      heap[outIdx++ >>> 0] = 128 | ((u >> 6) & 63);
+      heap[outIdx++ >>> 0] = 128 | (u & 63);
     }
   }
   // Null-terminate the pointer to the buffer.
-  heap[outIdx] = 0;
+  heap[outIdx >>> 0] = 0;
   return outIdx - startIdx;
 };
 
@@ -2594,7 +2606,7 @@ var MEMFS = {
               contents = Array.prototype.slice.call(contents, position, position + length);
             }
           }
-          GROWABLE_HEAP_I8().set(contents, ptr);
+          GROWABLE_HEAP_I8().set(contents, ptr >>> 0);
         }
       }
       return {
@@ -5377,7 +5389,7 @@ var SOCKFS = {
         if (sock.recv_queue.length) {
           bytes = sock.recv_queue[0].data.length;
         }
-        GROWABLE_HEAP_I32()[((arg) >> 2)] = bytes;
+        GROWABLE_HEAP_I32()[((arg) >>> 2) >>> 0] = bytes;
         return 0;
 
        default:
@@ -5729,25 +5741,25 @@ var inetPton6 = str => {
     addr = inetPton4(addr);
     zeroMemory(sa, 16);
     if (addrlen) {
-      GROWABLE_HEAP_I32()[((addrlen) >> 2)] = 16;
+      GROWABLE_HEAP_I32()[((addrlen) >>> 2) >>> 0] = 16;
     }
-    GROWABLE_HEAP_I16()[((sa) >> 1)] = family;
-    GROWABLE_HEAP_I32()[(((sa) + (4)) >> 2)] = addr;
-    GROWABLE_HEAP_I16()[(((sa) + (2)) >> 1)] = _htons(port);
+    GROWABLE_HEAP_I16()[((sa) >>> 1) >>> 0] = family;
+    GROWABLE_HEAP_I32()[(((sa) + (4)) >>> 2) >>> 0] = addr;
+    GROWABLE_HEAP_I16()[(((sa) + (2)) >>> 1) >>> 0] = _htons(port);
     break;
 
    case 10:
     addr = inetPton6(addr);
     zeroMemory(sa, 28);
     if (addrlen) {
-      GROWABLE_HEAP_I32()[((addrlen) >> 2)] = 28;
+      GROWABLE_HEAP_I32()[((addrlen) >>> 2) >>> 0] = 28;
     }
-    GROWABLE_HEAP_I32()[((sa) >> 2)] = family;
-    GROWABLE_HEAP_I32()[(((sa) + (8)) >> 2)] = addr[0];
-    GROWABLE_HEAP_I32()[(((sa) + (12)) >> 2)] = addr[1];
-    GROWABLE_HEAP_I32()[(((sa) + (16)) >> 2)] = addr[2];
-    GROWABLE_HEAP_I32()[(((sa) + (20)) >> 2)] = addr[3];
-    GROWABLE_HEAP_I16()[(((sa) + (2)) >> 1)] = _htons(port);
+    GROWABLE_HEAP_I32()[((sa) >>> 2) >>> 0] = family;
+    GROWABLE_HEAP_I32()[(((sa) + (8)) >>> 2) >>> 0] = addr[0];
+    GROWABLE_HEAP_I32()[(((sa) + (12)) >>> 2) >>> 0] = addr[1];
+    GROWABLE_HEAP_I32()[(((sa) + (16)) >>> 2) >>> 0] = addr[2];
+    GROWABLE_HEAP_I32()[(((sa) + (20)) >>> 2) >>> 0] = addr[3];
+    GROWABLE_HEAP_I16()[(((sa) + (2)) >>> 1) >>> 0] = _htons(port);
     break;
 
    default:
@@ -5795,6 +5807,8 @@ var DNS = {
 
 function ___syscall_accept4(fd, addr, addrlen, flags, d1, d2) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(3, 0, 1, fd, addr, addrlen, flags, d1, d2);
+  addr >>>= 0;
+  addrlen >>>= 0;
   try {
     var sock = getSocketFromFD(fd);
     var newsock = sock.sock_ops.accept(sock);
@@ -5901,8 +5915,8 @@ var inetNtop6 = ints => {
 
 var readSockaddr = (sa, salen) => {
   // family / port offsets are common to both sockaddr_in and sockaddr_in6
-  var family = GROWABLE_HEAP_I16()[((sa) >> 1)];
-  var port = _ntohs(GROWABLE_HEAP_U16()[(((sa) + (2)) >> 1)]);
+  var family = GROWABLE_HEAP_I16()[((sa) >>> 1) >>> 0];
+  var port = _ntohs(GROWABLE_HEAP_U16()[(((sa) + (2)) >>> 1) >>> 0]);
   var addr;
   switch (family) {
    case 2:
@@ -5911,7 +5925,7 @@ var readSockaddr = (sa, salen) => {
         errno: 28
       };
     }
-    addr = GROWABLE_HEAP_I32()[(((sa) + (4)) >> 2)];
+    addr = GROWABLE_HEAP_I32()[(((sa) + (4)) >>> 2) >>> 0];
     addr = inetNtop4(addr);
     break;
 
@@ -5921,7 +5935,7 @@ var readSockaddr = (sa, salen) => {
         errno: 28
       };
     }
-    addr = [ GROWABLE_HEAP_I32()[(((sa) + (8)) >> 2)], GROWABLE_HEAP_I32()[(((sa) + (12)) >> 2)], GROWABLE_HEAP_I32()[(((sa) + (16)) >> 2)], GROWABLE_HEAP_I32()[(((sa) + (20)) >> 2)] ];
+    addr = [ GROWABLE_HEAP_I32()[(((sa) + (8)) >>> 2) >>> 0], GROWABLE_HEAP_I32()[(((sa) + (12)) >>> 2) >>> 0], GROWABLE_HEAP_I32()[(((sa) + (16)) >>> 2) >>> 0], GROWABLE_HEAP_I32()[(((sa) + (20)) >>> 2) >>> 0] ];
     addr = inetNtop6(addr);
     break;
 
@@ -5946,6 +5960,8 @@ var getSocketAddress = (addrp, addrlen) => {
 
 function ___syscall_bind(fd, addr, addrlen, d1, d2, d3) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(4, 0, 1, fd, addr, addrlen, d1, d2, d3);
+  addr >>>= 0;
+  addrlen >>>= 0;
   try {
     var sock = getSocketFromFD(fd);
     var info = getSocketAddress(addr, addrlen);
@@ -5981,33 +5997,33 @@ var SYSCALLS = {
   },
   doStat(func, path, buf) {
     var stat = func(path);
-    GROWABLE_HEAP_I32()[((buf) >> 2)] = stat.dev;
-    GROWABLE_HEAP_I32()[(((buf) + (4)) >> 2)] = stat.mode;
-    GROWABLE_HEAP_U32()[(((buf) + (8)) >> 2)] = stat.nlink;
-    GROWABLE_HEAP_I32()[(((buf) + (12)) >> 2)] = stat.uid;
-    GROWABLE_HEAP_I32()[(((buf) + (16)) >> 2)] = stat.gid;
-    GROWABLE_HEAP_I32()[(((buf) + (20)) >> 2)] = stat.rdev;
+    GROWABLE_HEAP_I32()[((buf) >>> 2) >>> 0] = stat.dev;
+    GROWABLE_HEAP_I32()[(((buf) + (4)) >>> 2) >>> 0] = stat.mode;
+    GROWABLE_HEAP_U32()[(((buf) + (8)) >>> 2) >>> 0] = stat.nlink;
+    GROWABLE_HEAP_I32()[(((buf) + (12)) >>> 2) >>> 0] = stat.uid;
+    GROWABLE_HEAP_I32()[(((buf) + (16)) >>> 2) >>> 0] = stat.gid;
+    GROWABLE_HEAP_I32()[(((buf) + (20)) >>> 2) >>> 0] = stat.rdev;
     (tempI64 = [ stat.size >>> 0, (tempDouble = stat.size, (+(Math.abs(tempDouble))) >= 1 ? (tempDouble > 0 ? (+(Math.floor((tempDouble) / 4294967296))) >>> 0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble))) >>> 0)) / 4294967296))))) >>> 0) : 0) ], 
-    GROWABLE_HEAP_I32()[(((buf) + (24)) >> 2)] = tempI64[0], GROWABLE_HEAP_I32()[(((buf) + (28)) >> 2)] = tempI64[1]);
-    GROWABLE_HEAP_I32()[(((buf) + (32)) >> 2)] = 4096;
-    GROWABLE_HEAP_I32()[(((buf) + (36)) >> 2)] = stat.blocks;
+    GROWABLE_HEAP_I32()[(((buf) + (24)) >>> 2) >>> 0] = tempI64[0], GROWABLE_HEAP_I32()[(((buf) + (28)) >>> 2) >>> 0] = tempI64[1]);
+    GROWABLE_HEAP_I32()[(((buf) + (32)) >>> 2) >>> 0] = 4096;
+    GROWABLE_HEAP_I32()[(((buf) + (36)) >>> 2) >>> 0] = stat.blocks;
     var atime = stat.atime.getTime();
     var mtime = stat.mtime.getTime();
     var ctime = stat.ctime.getTime();
     (tempI64 = [ Math.floor(atime / 1e3) >>> 0, (tempDouble = Math.floor(atime / 1e3), 
     (+(Math.abs(tempDouble))) >= 1 ? (tempDouble > 0 ? (+(Math.floor((tempDouble) / 4294967296))) >>> 0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble))) >>> 0)) / 4294967296))))) >>> 0) : 0) ], 
-    GROWABLE_HEAP_I32()[(((buf) + (40)) >> 2)] = tempI64[0], GROWABLE_HEAP_I32()[(((buf) + (44)) >> 2)] = tempI64[1]);
-    GROWABLE_HEAP_U32()[(((buf) + (48)) >> 2)] = (atime % 1e3) * 1e3 * 1e3;
+    GROWABLE_HEAP_I32()[(((buf) + (40)) >>> 2) >>> 0] = tempI64[0], GROWABLE_HEAP_I32()[(((buf) + (44)) >>> 2) >>> 0] = tempI64[1]);
+    GROWABLE_HEAP_U32()[(((buf) + (48)) >>> 2) >>> 0] = (atime % 1e3) * 1e3 * 1e3;
     (tempI64 = [ Math.floor(mtime / 1e3) >>> 0, (tempDouble = Math.floor(mtime / 1e3), 
     (+(Math.abs(tempDouble))) >= 1 ? (tempDouble > 0 ? (+(Math.floor((tempDouble) / 4294967296))) >>> 0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble))) >>> 0)) / 4294967296))))) >>> 0) : 0) ], 
-    GROWABLE_HEAP_I32()[(((buf) + (56)) >> 2)] = tempI64[0], GROWABLE_HEAP_I32()[(((buf) + (60)) >> 2)] = tempI64[1]);
-    GROWABLE_HEAP_U32()[(((buf) + (64)) >> 2)] = (mtime % 1e3) * 1e3 * 1e3;
+    GROWABLE_HEAP_I32()[(((buf) + (56)) >>> 2) >>> 0] = tempI64[0], GROWABLE_HEAP_I32()[(((buf) + (60)) >>> 2) >>> 0] = tempI64[1]);
+    GROWABLE_HEAP_U32()[(((buf) + (64)) >>> 2) >>> 0] = (mtime % 1e3) * 1e3 * 1e3;
     (tempI64 = [ Math.floor(ctime / 1e3) >>> 0, (tempDouble = Math.floor(ctime / 1e3), 
     (+(Math.abs(tempDouble))) >= 1 ? (tempDouble > 0 ? (+(Math.floor((tempDouble) / 4294967296))) >>> 0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble))) >>> 0)) / 4294967296))))) >>> 0) : 0) ], 
-    GROWABLE_HEAP_I32()[(((buf) + (72)) >> 2)] = tempI64[0], GROWABLE_HEAP_I32()[(((buf) + (76)) >> 2)] = tempI64[1]);
-    GROWABLE_HEAP_U32()[(((buf) + (80)) >> 2)] = (ctime % 1e3) * 1e3 * 1e3;
+    GROWABLE_HEAP_I32()[(((buf) + (72)) >>> 2) >>> 0] = tempI64[0], GROWABLE_HEAP_I32()[(((buf) + (76)) >>> 2) >>> 0] = tempI64[1]);
+    GROWABLE_HEAP_U32()[(((buf) + (80)) >>> 2) >>> 0] = (ctime % 1e3) * 1e3 * 1e3;
     (tempI64 = [ stat.ino >>> 0, (tempDouble = stat.ino, (+(Math.abs(tempDouble))) >= 1 ? (tempDouble > 0 ? (+(Math.floor((tempDouble) / 4294967296))) >>> 0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble))) >>> 0)) / 4294967296))))) >>> 0) : 0) ], 
-    GROWABLE_HEAP_I32()[(((buf) + (88)) >> 2)] = tempI64[0], GROWABLE_HEAP_I32()[(((buf) + (92)) >> 2)] = tempI64[1]);
+    GROWABLE_HEAP_I32()[(((buf) + (88)) >>> 2) >>> 0] = tempI64[0], GROWABLE_HEAP_I32()[(((buf) + (92)) >>> 2) >>> 0] = tempI64[1]);
     return 0;
   },
   doMsync(addr, stream, len, flags, offset) {
@@ -6034,6 +6050,7 @@ var SYSCALLS = {
 
 function ___syscall_chdir(path) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(5, 0, 1, path);
+  path >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     FS.chdir(path);
@@ -6046,6 +6063,7 @@ function ___syscall_chdir(path) {
 
 function ___syscall_chmod(path, mode) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(6, 0, 1, path, mode);
+  path >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     FS.chmod(path, mode);
@@ -6058,6 +6076,8 @@ function ___syscall_chmod(path, mode) {
 
 function ___syscall_connect(fd, addr, addrlen, d1, d2, d3) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(7, 0, 1, fd, addr, addrlen, d1, d2, d3);
+  addr >>>= 0;
+  addrlen >>>= 0;
   try {
     var sock = getSocketFromFD(fd);
     var info = getSocketAddress(addr, addrlen);
@@ -6099,6 +6119,7 @@ function ___syscall_dup3(fd, newfd, flags) {
 
 function ___syscall_faccessat(dirfd, path, amode, flags) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(10, 0, 1, dirfd, path, amode, flags);
+  path >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     assert(flags === 0 || flags == 512);
@@ -6153,6 +6174,7 @@ function ___syscall_fchmod(fd, mode) {
 
 function ___syscall_fchmodat2(dirfd, path, mode, flags) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(13, 0, 1, dirfd, path, mode, flags);
+  path >>>= 0;
   try {
     var nofollow = flags & 256;
     path = SYSCALLS.getStr(path);
@@ -6178,6 +6200,7 @@ function ___syscall_fchown32(fd, owner, group) {
 
 function ___syscall_fchownat(dirfd, path, owner, group, flags) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(15, 0, 1, dirfd, path, owner, group, flags);
+  path >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     var nofollow = flags & 256;
@@ -6195,7 +6218,7 @@ function ___syscall_fchownat(dirfd, path, owner, group, flags) {
 /** @suppress {duplicate } */ function syscallGetVarargI() {
   assert(SYSCALLS.varargs != undefined);
   // the `+` prepended here is necessary to convince the JSCompiler that varargs is indeed a number.
-  var ret = GROWABLE_HEAP_I32()[((+SYSCALLS.varargs) >> 2)];
+  var ret = GROWABLE_HEAP_I32()[((+SYSCALLS.varargs) >>> 2) >>> 0];
   SYSCALLS.varargs += 4;
   return ret;
 }
@@ -6204,6 +6227,7 @@ var syscallGetVarargP = syscallGetVarargI;
 
 function ___syscall_fcntl64(fd, cmd, varargs) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(16, 0, 1, fd, cmd, varargs);
+  varargs >>>= 0;
   SYSCALLS.varargs = varargs;
   try {
     var stream = SYSCALLS.getStreamFromFD(fd);
@@ -6242,7 +6266,7 @@ function ___syscall_fcntl64(fd, cmd, varargs) {
         var arg = syscallGetVarargP();
         var offset = 0;
         // We're always unlocked.
-        GROWABLE_HEAP_I16()[(((arg) + (offset)) >> 1)] = 2;
+        GROWABLE_HEAP_I16()[(((arg) + (offset)) >>> 1) >>> 0] = 2;
         return 0;
       }
 
@@ -6272,6 +6296,7 @@ function ___syscall_fdatasync(fd) {
 
 function ___syscall_fstat64(fd, buf) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(18, 0, 1, fd, buf);
+  buf >>>= 0;
   try {
     var stream = SYSCALLS.getStreamFromFD(fd);
     return SYSCALLS.doStat(FS.stat, stream.path, buf);
@@ -6283,22 +6308,25 @@ function ___syscall_fstat64(fd, buf) {
 
 function ___syscall_statfs64(path, size, buf) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(20, 0, 1, path, size, buf);
+  path >>>= 0;
+  size >>>= 0;
+  buf >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     assert(size === 64);
     // NOTE: None of the constants here are true. We're just returning safe and
     //       sane values.
-    GROWABLE_HEAP_I32()[(((buf) + (4)) >> 2)] = 4096;
-    GROWABLE_HEAP_I32()[(((buf) + (40)) >> 2)] = 4096;
-    GROWABLE_HEAP_I32()[(((buf) + (8)) >> 2)] = 1e6;
-    GROWABLE_HEAP_I32()[(((buf) + (12)) >> 2)] = 5e5;
-    GROWABLE_HEAP_I32()[(((buf) + (16)) >> 2)] = 5e5;
-    GROWABLE_HEAP_I32()[(((buf) + (20)) >> 2)] = FS.nextInode;
-    GROWABLE_HEAP_I32()[(((buf) + (24)) >> 2)] = 1e6;
-    GROWABLE_HEAP_I32()[(((buf) + (28)) >> 2)] = 42;
-    GROWABLE_HEAP_I32()[(((buf) + (44)) >> 2)] = 2;
+    GROWABLE_HEAP_I32()[(((buf) + (4)) >>> 2) >>> 0] = 4096;
+    GROWABLE_HEAP_I32()[(((buf) + (40)) >>> 2) >>> 0] = 4096;
+    GROWABLE_HEAP_I32()[(((buf) + (8)) >>> 2) >>> 0] = 1e6;
+    GROWABLE_HEAP_I32()[(((buf) + (12)) >>> 2) >>> 0] = 5e5;
+    GROWABLE_HEAP_I32()[(((buf) + (16)) >>> 2) >>> 0] = 5e5;
+    GROWABLE_HEAP_I32()[(((buf) + (20)) >>> 2) >>> 0] = FS.nextInode;
+    GROWABLE_HEAP_I32()[(((buf) + (24)) >>> 2) >>> 0] = 1e6;
+    GROWABLE_HEAP_I32()[(((buf) + (28)) >>> 2) >>> 0] = 42;
+    GROWABLE_HEAP_I32()[(((buf) + (44)) >>> 2) >>> 0] = 2;
     // ST_NOSUID
-    GROWABLE_HEAP_I32()[(((buf) + (36)) >> 2)] = 255;
+    GROWABLE_HEAP_I32()[(((buf) + (36)) >>> 2) >>> 0] = 255;
     return 0;
   } catch (e) {
     if (typeof FS == "undefined" || !(e.name === "ErrnoError")) throw e;
@@ -6308,6 +6336,8 @@ function ___syscall_statfs64(path, size, buf) {
 
 function ___syscall_fstatfs64(fd, size, buf) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(19, 0, 1, fd, size, buf);
+  size >>>= 0;
+  buf >>>= 0;
   try {
     var stream = SYSCALLS.getStreamFromFD(fd);
     return ___syscall_statfs64(0, size, buf);
@@ -6337,6 +6367,8 @@ var stringToUTF8 = (str, outPtr, maxBytesToWrite) => {
 
 function ___syscall_getcwd(buf, size) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(22, 0, 1, buf, size);
+  buf >>>= 0;
+  size >>>= 0;
   try {
     if (size === 0) return -28;
     var cwd = FS.cwd();
@@ -6352,6 +6384,8 @@ function ___syscall_getcwd(buf, size) {
 
 function ___syscall_getdents64(fd, dirp, count) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(23, 0, 1, fd, dirp, count);
+  dirp >>>= 0;
+  count >>>= 0;
   try {
     var stream = SYSCALLS.getStreamFromFD(fd);
     stream.getdents ||= FS.readdir(stream.path);
@@ -6385,12 +6419,12 @@ function ___syscall_getdents64(fd, dirp, count) {
       // DT_REG, regular file.
       assert(id);
       (tempI64 = [ id >>> 0, (tempDouble = id, (+(Math.abs(tempDouble))) >= 1 ? (tempDouble > 0 ? (+(Math.floor((tempDouble) / 4294967296))) >>> 0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble))) >>> 0)) / 4294967296))))) >>> 0) : 0) ], 
-      GROWABLE_HEAP_I32()[((dirp + pos) >> 2)] = tempI64[0], GROWABLE_HEAP_I32()[(((dirp + pos) + (4)) >> 2)] = tempI64[1]);
+      GROWABLE_HEAP_I32()[((dirp + pos) >>> 2) >>> 0] = tempI64[0], GROWABLE_HEAP_I32()[(((dirp + pos) + (4)) >>> 2) >>> 0] = tempI64[1]);
       (tempI64 = [ (idx + 1) * struct_size >>> 0, (tempDouble = (idx + 1) * struct_size, 
       (+(Math.abs(tempDouble))) >= 1 ? (tempDouble > 0 ? (+(Math.floor((tempDouble) / 4294967296))) >>> 0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble))) >>> 0)) / 4294967296))))) >>> 0) : 0) ], 
-      GROWABLE_HEAP_I32()[(((dirp + pos) + (8)) >> 2)] = tempI64[0], GROWABLE_HEAP_I32()[(((dirp + pos) + (12)) >> 2)] = tempI64[1]);
-      GROWABLE_HEAP_I16()[(((dirp + pos) + (16)) >> 1)] = 280;
-      GROWABLE_HEAP_I8()[(dirp + pos) + (18)] = type;
+      GROWABLE_HEAP_I32()[(((dirp + pos) + (8)) >>> 2) >>> 0] = tempI64[0], GROWABLE_HEAP_I32()[(((dirp + pos) + (12)) >>> 2) >>> 0] = tempI64[1]);
+      GROWABLE_HEAP_I16()[(((dirp + pos) + (16)) >>> 1) >>> 0] = 280;
+      GROWABLE_HEAP_I8()[(dirp + pos) + (18) >>> 0] = type;
       stringToUTF8(name, dirp + pos + 19, 256);
       pos += struct_size;
       idx += 1;
@@ -6405,6 +6439,8 @@ function ___syscall_getdents64(fd, dirp, count) {
 
 function ___syscall_getpeername(fd, addr, addrlen, d1, d2, d3) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(24, 0, 1, fd, addr, addrlen, d1, d2, d3);
+  addr >>>= 0;
+  addrlen >>>= 0;
   try {
     var sock = getSocketFromFD(fd);
     if (!sock.daddr) {
@@ -6422,6 +6458,8 @@ function ___syscall_getpeername(fd, addr, addrlen, d1, d2, d3) {
 
 function ___syscall_getsockname(fd, addr, addrlen, d1, d2, d3) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(25, 0, 1, fd, addr, addrlen, d1, d2, d3);
+  addr >>>= 0;
+  addrlen >>>= 0;
   try {
     var sock = getSocketFromFD(fd);
     // TODO: sock.saddr should never be undefined, see TODO in websocket_sock_ops.getname
@@ -6436,14 +6474,16 @@ function ___syscall_getsockname(fd, addr, addrlen, d1, d2, d3) {
 
 function ___syscall_getsockopt(fd, level, optname, optval, optlen, d1) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(26, 0, 1, fd, level, optname, optval, optlen, d1);
+  optval >>>= 0;
+  optlen >>>= 0;
   try {
     var sock = getSocketFromFD(fd);
     // Minimal getsockopt aimed at resolving https://github.com/emscripten-core/emscripten/issues/2211
     // so only supports SOL_SOCKET with SO_ERROR.
     if (level === 1) {
       if (optname === 4) {
-        GROWABLE_HEAP_I32()[((optval) >> 2)] = sock.error;
-        GROWABLE_HEAP_I32()[((optlen) >> 2)] = 4;
+        GROWABLE_HEAP_I32()[((optval) >>> 2) >>> 0] = sock.error;
+        GROWABLE_HEAP_I32()[((optlen) >>> 2) >>> 0] = 4;
         sock.error = null;
         // Clear the error (The SO_ERROR option obtains and then clears this field).
         return 0;
@@ -6459,6 +6499,7 @@ function ___syscall_getsockopt(fd, level, optname, optval, optlen, d1) {
 
 function ___syscall_ioctl(fd, op, varargs) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(27, 0, 1, fd, op, varargs);
+  varargs >>>= 0;
   SYSCALLS.varargs = varargs;
   try {
     var stream = SYSCALLS.getStreamFromFD(fd);
@@ -6475,12 +6516,12 @@ function ___syscall_ioctl(fd, op, varargs) {
         if (stream.tty.ops.ioctl_tcgets) {
           var termios = stream.tty.ops.ioctl_tcgets(stream);
           var argp = syscallGetVarargP();
-          GROWABLE_HEAP_I32()[((argp) >> 2)] = termios.c_iflag || 0;
-          GROWABLE_HEAP_I32()[(((argp) + (4)) >> 2)] = termios.c_oflag || 0;
-          GROWABLE_HEAP_I32()[(((argp) + (8)) >> 2)] = termios.c_cflag || 0;
-          GROWABLE_HEAP_I32()[(((argp) + (12)) >> 2)] = termios.c_lflag || 0;
+          GROWABLE_HEAP_I32()[((argp) >>> 2) >>> 0] = termios.c_iflag || 0;
+          GROWABLE_HEAP_I32()[(((argp) + (4)) >>> 2) >>> 0] = termios.c_oflag || 0;
+          GROWABLE_HEAP_I32()[(((argp) + (8)) >>> 2) >>> 0] = termios.c_cflag || 0;
+          GROWABLE_HEAP_I32()[(((argp) + (12)) >>> 2) >>> 0] = termios.c_lflag || 0;
           for (var i = 0; i < 32; i++) {
-            GROWABLE_HEAP_I8()[(argp + i) + (17)] = termios.c_cc[i] || 0;
+            GROWABLE_HEAP_I8()[(argp + i) + (17) >>> 0] = termios.c_cc[i] || 0;
           }
           return 0;
         }
@@ -6503,13 +6544,13 @@ function ___syscall_ioctl(fd, op, varargs) {
         if (!stream.tty) return -59;
         if (stream.tty.ops.ioctl_tcsets) {
           var argp = syscallGetVarargP();
-          var c_iflag = GROWABLE_HEAP_I32()[((argp) >> 2)];
-          var c_oflag = GROWABLE_HEAP_I32()[(((argp) + (4)) >> 2)];
-          var c_cflag = GROWABLE_HEAP_I32()[(((argp) + (8)) >> 2)];
-          var c_lflag = GROWABLE_HEAP_I32()[(((argp) + (12)) >> 2)];
+          var c_iflag = GROWABLE_HEAP_I32()[((argp) >>> 2) >>> 0];
+          var c_oflag = GROWABLE_HEAP_I32()[(((argp) + (4)) >>> 2) >>> 0];
+          var c_cflag = GROWABLE_HEAP_I32()[(((argp) + (8)) >>> 2) >>> 0];
+          var c_lflag = GROWABLE_HEAP_I32()[(((argp) + (12)) >>> 2) >>> 0];
           var c_cc = [];
           for (var i = 0; i < 32; i++) {
-            c_cc.push(GROWABLE_HEAP_I8()[(argp + i) + (17)]);
+            c_cc.push(GROWABLE_HEAP_I8()[(argp + i) + (17) >>> 0]);
           }
           return stream.tty.ops.ioctl_tcsets(stream.tty, op, {
             c_iflag,
@@ -6527,7 +6568,7 @@ function ___syscall_ioctl(fd, op, varargs) {
       {
         if (!stream.tty) return -59;
         var argp = syscallGetVarargP();
-        GROWABLE_HEAP_I32()[((argp) >> 2)] = 0;
+        GROWABLE_HEAP_I32()[((argp) >>> 2) >>> 0] = 0;
         return 0;
       }
 
@@ -6552,8 +6593,8 @@ function ___syscall_ioctl(fd, op, varargs) {
         if (stream.tty.ops.ioctl_tiocgwinsz) {
           var winsize = stream.tty.ops.ioctl_tiocgwinsz(stream.tty);
           var argp = syscallGetVarargP();
-          GROWABLE_HEAP_I16()[((argp) >> 1)] = winsize[0];
-          GROWABLE_HEAP_I16()[(((argp) + (2)) >> 1)] = winsize[1];
+          GROWABLE_HEAP_I16()[((argp) >>> 1) >>> 0] = winsize[0];
+          GROWABLE_HEAP_I16()[(((argp) + (2)) >>> 1) >>> 0] = winsize[1];
         }
         return 0;
       }
@@ -6597,6 +6638,8 @@ function ___syscall_listen(fd, backlog) {
 
 function ___syscall_lstat64(path, buf) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(29, 0, 1, path, buf);
+  path >>>= 0;
+  buf >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     return SYSCALLS.doStat(FS.lstat, path, buf);
@@ -6608,6 +6651,7 @@ function ___syscall_lstat64(path, buf) {
 
 function ___syscall_mkdirat(dirfd, path, mode) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(30, 0, 1, dirfd, path, mode);
+  path >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     path = SYSCALLS.calculateAt(dirfd, path);
@@ -6625,6 +6669,8 @@ function ___syscall_mkdirat(dirfd, path, mode) {
 
 function ___syscall_newfstatat(dirfd, path, buf, flags) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(31, 0, 1, dirfd, path, buf, flags);
+  path >>>= 0;
+  buf >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     var nofollow = flags & 256;
@@ -6641,6 +6687,8 @@ function ___syscall_newfstatat(dirfd, path, buf, flags) {
 
 function ___syscall_openat(dirfd, path, flags, varargs) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(32, 0, 1, dirfd, path, flags, varargs);
+  path >>>= 0;
+  varargs >>>= 0;
   SYSCALLS.varargs = varargs;
   try {
     path = SYSCALLS.getStr(path);
@@ -6842,13 +6890,14 @@ var PIPEFS = {
 
 function ___syscall_pipe(fdPtr) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(33, 0, 1, fdPtr);
+  fdPtr >>>= 0;
   try {
     if (fdPtr == 0) {
       throw new FS.ErrnoError(21);
     }
     var res = PIPEFS.createPipe();
-    GROWABLE_HEAP_I32()[((fdPtr) >> 2)] = res.readable_fd;
-    GROWABLE_HEAP_I32()[(((fdPtr) + (4)) >> 2)] = res.writable_fd;
+    GROWABLE_HEAP_I32()[((fdPtr) >>> 2) >>> 0] = res.readable_fd;
+    GROWABLE_HEAP_I32()[(((fdPtr) + (4)) >>> 2) >>> 0] = res.writable_fd;
     return 0;
   } catch (e) {
     if (typeof FS == "undefined" || !(e.name === "ErrnoError")) throw e;
@@ -6858,12 +6907,13 @@ function ___syscall_pipe(fdPtr) {
 
 function ___syscall_poll(fds, nfds, timeout) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(34, 0, 1, fds, nfds, timeout);
+  fds >>>= 0;
   try {
     var nonzero = 0;
     for (var i = 0; i < nfds; i++) {
       var pollfd = fds + 8 * i;
-      var fd = GROWABLE_HEAP_I32()[((pollfd) >> 2)];
-      var events = GROWABLE_HEAP_I16()[(((pollfd) + (4)) >> 1)];
+      var fd = GROWABLE_HEAP_I32()[((pollfd) >>> 2) >>> 0];
+      var events = GROWABLE_HEAP_I16()[(((pollfd) + (4)) >>> 1) >>> 0];
       var mask = 32;
       var stream = FS.getStream(fd);
       if (stream) {
@@ -6874,7 +6924,7 @@ function ___syscall_poll(fds, nfds, timeout) {
       }
       mask &= events | 8 | 16;
       if (mask) nonzero++;
-      GROWABLE_HEAP_I16()[(((pollfd) + (6)) >> 1)] = mask;
+      GROWABLE_HEAP_I16()[(((pollfd) + (6)) >>> 1) >>> 0] = mask;
     }
     return nonzero;
   } catch (e) {
@@ -6885,17 +6935,20 @@ function ___syscall_poll(fds, nfds, timeout) {
 
 function ___syscall_readlinkat(dirfd, path, buf, bufsize) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(35, 0, 1, dirfd, path, buf, bufsize);
+  path >>>= 0;
+  buf >>>= 0;
+  bufsize >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     path = SYSCALLS.calculateAt(dirfd, path);
     if (bufsize <= 0) return -28;
     var ret = FS.readlink(path);
     var len = Math.min(bufsize, lengthBytesUTF8(ret));
-    var endChar = GROWABLE_HEAP_I8()[buf + len];
+    var endChar = GROWABLE_HEAP_I8()[buf + len >>> 0];
     stringToUTF8(ret, buf, bufsize + 1);
     // readlink is one of the rare functions that write out a C string, but does never append a null to the output buffer(!)
     // stringToUTF8() always appends a null byte, so restore the character under the null byte after the write.
-    GROWABLE_HEAP_I8()[buf + len] = endChar;
+    GROWABLE_HEAP_I8()[buf + len >>> 0] = endChar;
     return len;
   } catch (e) {
     if (typeof FS == "undefined" || !(e.name === "ErrnoError")) throw e;
@@ -6905,14 +6958,15 @@ function ___syscall_readlinkat(dirfd, path, buf, bufsize) {
 
 function ___syscall_recvmsg(fd, message, flags, d1, d2, d3) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(36, 0, 1, fd, message, flags, d1, d2, d3);
+  message >>>= 0;
   try {
     var sock = getSocketFromFD(fd);
-    var iov = GROWABLE_HEAP_U32()[(((message) + (8)) >> 2)];
-    var num = GROWABLE_HEAP_I32()[(((message) + (12)) >> 2)];
+    var iov = GROWABLE_HEAP_U32()[(((message) + (8)) >>> 2) >>> 0];
+    var num = GROWABLE_HEAP_I32()[(((message) + (12)) >>> 2) >>> 0];
     // get the total amount of data we can read across all arrays
     var total = 0;
     for (var i = 0; i < num; i++) {
-      total += GROWABLE_HEAP_I32()[(((iov) + ((8 * i) + 4)) >> 2)];
+      total += GROWABLE_HEAP_I32()[(((iov) + ((8 * i) + 4)) >>> 2) >>> 0];
     }
     // try to read total data
     var msg = sock.sock_ops.recvmsg(sock, total);
@@ -6926,7 +6980,7 @@ function ___syscall_recvmsg(fd, message, flags, d1, d2, d3) {
     // MSG_WAITALL
     // Requests that the function block until the full amount of data requested can be returned. The function may return a smaller amount of data if a signal is caught, if the connection is terminated, if MSG_PEEK was specified, or if an error is pending for the socket.
     // write the source address out
-    var name = GROWABLE_HEAP_U32()[((message) >> 2)];
+    var name = GROWABLE_HEAP_U32()[((message) >>> 2) >>> 0];
     if (name) {
       var errno = writeSockaddr(name, sock.family, DNS.lookup_name(msg.addr), msg.port);
       assert(!errno);
@@ -6935,14 +6989,14 @@ function ___syscall_recvmsg(fd, message, flags, d1, d2, d3) {
     var bytesRead = 0;
     var bytesRemaining = msg.buffer.byteLength;
     for (var i = 0; bytesRemaining > 0 && i < num; i++) {
-      var iovbase = GROWABLE_HEAP_U32()[(((iov) + ((8 * i) + 0)) >> 2)];
-      var iovlen = GROWABLE_HEAP_I32()[(((iov) + ((8 * i) + 4)) >> 2)];
+      var iovbase = GROWABLE_HEAP_U32()[(((iov) + ((8 * i) + 0)) >>> 2) >>> 0];
+      var iovlen = GROWABLE_HEAP_I32()[(((iov) + ((8 * i) + 4)) >>> 2) >>> 0];
       if (!iovlen) {
         continue;
       }
       var length = Math.min(iovlen, bytesRemaining);
       var buf = msg.buffer.subarray(bytesRead, bytesRead + length);
-      GROWABLE_HEAP_U8().set(buf, iovbase + bytesRead);
+      GROWABLE_HEAP_U8().set(buf, iovbase + bytesRead >>> 0);
       bytesRead += length;
       bytesRemaining -= length;
     }
@@ -6963,6 +7017,8 @@ function ___syscall_recvmsg(fd, message, flags, d1, d2, d3) {
 
 function ___syscall_renameat(olddirfd, oldpath, newdirfd, newpath) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(37, 0, 1, olddirfd, oldpath, newdirfd, newpath);
+  oldpath >>>= 0;
+  newpath >>>= 0;
   try {
     oldpath = SYSCALLS.getStr(oldpath);
     newpath = SYSCALLS.getStr(newpath);
@@ -6978,14 +7034,17 @@ function ___syscall_renameat(olddirfd, oldpath, newdirfd, newpath) {
 
 function ___syscall_sendmsg(fd, message, flags, d1, d2, d3) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(38, 0, 1, fd, message, flags, d1, d2, d3);
+  message >>>= 0;
+  d1 >>>= 0;
+  d2 >>>= 0;
   try {
     var sock = getSocketFromFD(fd);
-    var iov = GROWABLE_HEAP_U32()[(((message) + (8)) >> 2)];
-    var num = GROWABLE_HEAP_I32()[(((message) + (12)) >> 2)];
+    var iov = GROWABLE_HEAP_U32()[(((message) + (8)) >>> 2) >>> 0];
+    var num = GROWABLE_HEAP_I32()[(((message) + (12)) >>> 2) >>> 0];
     // read the address and port to send to
     var addr, port;
-    var name = GROWABLE_HEAP_U32()[((message) >> 2)];
-    var namelen = GROWABLE_HEAP_I32()[(((message) + (4)) >> 2)];
+    var name = GROWABLE_HEAP_U32()[((message) >>> 2) >>> 0];
+    var namelen = GROWABLE_HEAP_I32()[(((message) + (4)) >>> 2) >>> 0];
     if (name) {
       var info = getSocketAddress(name, namelen);
       port = info.port;
@@ -6994,15 +7053,15 @@ function ___syscall_sendmsg(fd, message, flags, d1, d2, d3) {
     // concatenate scatter-gather arrays into one message buffer
     var total = 0;
     for (var i = 0; i < num; i++) {
-      total += GROWABLE_HEAP_I32()[(((iov) + ((8 * i) + 4)) >> 2)];
+      total += GROWABLE_HEAP_I32()[(((iov) + ((8 * i) + 4)) >>> 2) >>> 0];
     }
     var view = new Uint8Array(total);
     var offset = 0;
     for (var i = 0; i < num; i++) {
-      var iovbase = GROWABLE_HEAP_U32()[(((iov) + ((8 * i) + 0)) >> 2)];
-      var iovlen = GROWABLE_HEAP_I32()[(((iov) + ((8 * i) + 4)) >> 2)];
+      var iovbase = GROWABLE_HEAP_U32()[(((iov) + ((8 * i) + 0)) >>> 2) >>> 0];
+      var iovlen = GROWABLE_HEAP_I32()[(((iov) + ((8 * i) + 4)) >>> 2) >>> 0];
       for (var j = 0; j < iovlen; j++) {
-        view[offset++] = GROWABLE_HEAP_I8()[(iovbase) + (j)];
+        view[offset++] = GROWABLE_HEAP_I8()[(iovbase) + (j) >>> 0];
       }
     }
     // write the buffer
@@ -7028,6 +7087,8 @@ function ___syscall_socket(domain, type, protocol) {
 
 function ___syscall_stat64(path, buf) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(40, 0, 1, path, buf);
+  path >>>= 0;
+  buf >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     return SYSCALLS.doStat(FS.stat, path, buf);
@@ -7039,6 +7100,8 @@ function ___syscall_stat64(path, buf) {
 
 function ___syscall_symlinkat(target, newdirfd, linkpath) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(41, 0, 1, target, newdirfd, linkpath);
+  target >>>= 0;
+  linkpath >>>= 0;
   try {
     linkpath = SYSCALLS.calculateAt(newdirfd, linkpath);
     FS.symlink(target, linkpath);
@@ -7051,6 +7114,7 @@ function ___syscall_symlinkat(target, newdirfd, linkpath) {
 
 function ___syscall_unlinkat(dirfd, path, flags) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(42, 0, 1, dirfd, path, flags);
+  path >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     path = SYSCALLS.calculateAt(dirfd, path);
@@ -7068,10 +7132,12 @@ function ___syscall_unlinkat(dirfd, path, flags) {
   }
 }
 
-var readI53FromI64 = ptr => GROWABLE_HEAP_U32()[((ptr) >> 2)] + GROWABLE_HEAP_I32()[(((ptr) + (4)) >> 2)] * 4294967296;
+var readI53FromI64 = ptr => GROWABLE_HEAP_U32()[((ptr) >>> 2) >>> 0] + GROWABLE_HEAP_I32()[(((ptr) + (4)) >>> 2) >>> 0] * 4294967296;
 
 function ___syscall_utimensat(dirfd, path, times, flags) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(43, 0, 1, dirfd, path, times, flags);
+  path >>>= 0;
+  times >>>= 0;
   try {
     path = SYSCALLS.getStr(path);
     assert(flags === 0);
@@ -7082,7 +7148,7 @@ function ___syscall_utimensat(dirfd, path, times, flags) {
       mtime = now;
     } else {
       var seconds = readI53FromI64(times);
-      var nanoseconds = GROWABLE_HEAP_I32()[(((times) + (8)) >> 2)];
+      var nanoseconds = GROWABLE_HEAP_I32()[(((times) + (8)) >>> 2) >>> 0];
       if (nanoseconds == 1073741823) {
         atime = now;
       } else if (nanoseconds == 1073741822) {
@@ -7092,7 +7158,7 @@ function ___syscall_utimensat(dirfd, path, times, flags) {
       }
       times += 16;
       seconds = readI53FromI64(times);
-      nanoseconds = GROWABLE_HEAP_I32()[(((times) + (8)) >> 2)];
+      nanoseconds = GROWABLE_HEAP_I32()[(((times) + (8)) >>> 2) >>> 0];
       if (nanoseconds == 1073741823) {
         mtime = now;
       } else if (nanoseconds == 1073741822) {
@@ -7122,13 +7188,14 @@ var nowIsMonotonic = 1;
 
 var __emscripten_get_now_is_monotonic = () => nowIsMonotonic;
 
-var __emscripten_init_main_thread_js = tb => {
+function __emscripten_init_main_thread_js(tb) {
+  tb >>>= 0;
   // Pass the thread address to the native code where they stored in wasm
   // globals which act as a form of TLS. Global constructors trying
   // to access this value will read the wrong value, but that is UB anyway.
   __emscripten_thread_init(tb, /*is_main=*/ !ENVIRONMENT_IS_WORKER, /*is_runtime=*/ 1, /*can_block=*/ !ENVIRONMENT_IS_WEB, /*default_stacksize=*/ 65536, /*start_profiling=*/ false);
   PThread.threadInitTLS();
-};
+}
 
 var maybeExit = () => {
   if (!keepRuntimeAlive()) {
@@ -7153,22 +7220,21 @@ var callUserCallback = func => {
   }
 };
 
-var __emscripten_thread_mailbox_await = pthread_ptr => {
+function __emscripten_thread_mailbox_await(pthread_ptr) {
+  pthread_ptr >>>= 0;
   if (typeof Atomics.waitAsync === "function") {
     // Wait on the pthread's initial self-pointer field because it is easy and
     // safe to access from sending threads that need to notify the waiting
     // thread.
     // TODO: How to make this work with wasm64?
-    var wait = Atomics.waitAsync(GROWABLE_HEAP_I32(), ((pthread_ptr) >> 2), pthread_ptr);
+    var wait = Atomics.waitAsync(GROWABLE_HEAP_I32(), ((pthread_ptr) >>> 2), pthread_ptr);
     assert(wait.async);
     wait.value.then(checkMailbox);
     var waitingAsync = pthread_ptr + 128;
-    Atomics.store(GROWABLE_HEAP_I32(), ((waitingAsync) >> 2), 1);
+    Atomics.store(GROWABLE_HEAP_I32(), ((waitingAsync) >>> 2), 1);
   }
-};
+}
 
-// If `Atomics.waitAsync` is not implemented, then we will always fall back
-// to postMessage and there is no need to do anything here.
 var checkMailbox = () => {
   // Only check the mailbox if we have a live pthread runtime. We implement
   // pthread_self to return 0 if there is no live runtime.
@@ -7183,7 +7249,9 @@ var checkMailbox = () => {
   }
 };
 
-var __emscripten_notify_mailbox_postmessage = (targetThread, currThreadId) => {
+function __emscripten_notify_mailbox_postmessage(targetThread, currThreadId) {
+  targetThread >>>= 0;
+  currThreadId >>>= 0;
   if (targetThread == currThreadId) {
     setTimeout(checkMailbox);
   } else if (ENVIRONMENT_IS_PTHREAD) {
@@ -7201,19 +7269,22 @@ var __emscripten_notify_mailbox_postmessage = (targetThread, currThreadId) => {
       cmd: "checkMailbox"
     });
   }
-};
+}
 
 var proxiedJSCallArgs = [];
 
-var __emscripten_receive_on_main_thread_js = (funcIndex, emAsmAddr, callingThread, numCallArgs, args) => {
+function __emscripten_receive_on_main_thread_js(funcIndex, emAsmAddr, callingThread, numCallArgs, args) {
+  emAsmAddr >>>= 0;
+  callingThread >>>= 0;
+  args >>>= 0;
   // Sometimes we need to backproxy events to the calling thread (e.g.
   // HTML5 DOM events handlers such as
   // emscripten_set_mousemove_callback()), so keep track in a globally
   // accessible variable about the thread that initiated the proxying.
   proxiedJSCallArgs.length = numCallArgs;
-  var b = ((args) >> 3);
+  var b = ((args) >>> 3);
   for (var i = 0; i < numCallArgs; i++) {
-    proxiedJSCallArgs[i] = GROWABLE_HEAP_F64()[b + i];
+    proxiedJSCallArgs[i] = GROWABLE_HEAP_F64()[b + i >>> 0];
   }
   // Proxied JS library funcs use funcIndex and EM_ASM functions use emAsmAddr
   assert(!emAsmAddr);
@@ -7228,14 +7299,15 @@ var __emscripten_receive_on_main_thread_js = (funcIndex, emAsmAddr, callingThrea
   // bigint.
   assert(typeof rtn != "bigint");
   return rtn;
-};
+}
 
 var __emscripten_runtime_keepalive_clear = () => {
   noExitRuntime = false;
   runtimeKeepaliveCounter = 0;
 };
 
-var __emscripten_thread_cleanup = thread => {
+function __emscripten_thread_cleanup(thread) {
+  thread >>>= 0;
   // Called when a thread needs to be cleaned up so it can be reused.
   // A thread is considered reusable when it either returns from its
   // entry point, calls pthread_exit, or acts upon a cancellation.
@@ -7245,9 +7317,10 @@ var __emscripten_thread_cleanup = thread => {
     cmd: "cleanupThread",
     thread
   });
-};
+}
 
-var __emscripten_thread_set_strongref = thread => {
+function __emscripten_thread_set_strongref(thread) {
+  thread >>>= 0;
   // Called when a thread needs to be strongly referenced.
   // Currently only used for:
   // - keeping the "main" thread alive in PROXY_TO_PTHREAD mode;
@@ -7256,7 +7329,7 @@ var __emscripten_thread_set_strongref = thread => {
   if (ENVIRONMENT_IS_NODE) {
     PThread.pthreads[thread].ref();
   }
-};
+}
 
 var __emscripten_throw_longjmp = () => {
   throw Infinity;
@@ -7278,35 +7351,39 @@ var ydayFromDate = date => {
 
 function __localtime_js(time_low, time_high, tmPtr) {
   var time = convertI32PairToI53Checked(time_low, time_high);
+  tmPtr >>>= 0;
   var date = new Date(time * 1e3);
-  GROWABLE_HEAP_I32()[((tmPtr) >> 2)] = date.getSeconds();
-  GROWABLE_HEAP_I32()[(((tmPtr) + (4)) >> 2)] = date.getMinutes();
-  GROWABLE_HEAP_I32()[(((tmPtr) + (8)) >> 2)] = date.getHours();
-  GROWABLE_HEAP_I32()[(((tmPtr) + (12)) >> 2)] = date.getDate();
-  GROWABLE_HEAP_I32()[(((tmPtr) + (16)) >> 2)] = date.getMonth();
-  GROWABLE_HEAP_I32()[(((tmPtr) + (20)) >> 2)] = date.getFullYear() - 1900;
-  GROWABLE_HEAP_I32()[(((tmPtr) + (24)) >> 2)] = date.getDay();
+  GROWABLE_HEAP_I32()[((tmPtr) >>> 2) >>> 0] = date.getSeconds();
+  GROWABLE_HEAP_I32()[(((tmPtr) + (4)) >>> 2) >>> 0] = date.getMinutes();
+  GROWABLE_HEAP_I32()[(((tmPtr) + (8)) >>> 2) >>> 0] = date.getHours();
+  GROWABLE_HEAP_I32()[(((tmPtr) + (12)) >>> 2) >>> 0] = date.getDate();
+  GROWABLE_HEAP_I32()[(((tmPtr) + (16)) >>> 2) >>> 0] = date.getMonth();
+  GROWABLE_HEAP_I32()[(((tmPtr) + (20)) >>> 2) >>> 0] = date.getFullYear() - 1900;
+  GROWABLE_HEAP_I32()[(((tmPtr) + (24)) >>> 2) >>> 0] = date.getDay();
   var yday = ydayFromDate(date) | 0;
-  GROWABLE_HEAP_I32()[(((tmPtr) + (28)) >> 2)] = yday;
-  GROWABLE_HEAP_I32()[(((tmPtr) + (36)) >> 2)] = -(date.getTimezoneOffset() * 60);
+  GROWABLE_HEAP_I32()[(((tmPtr) + (28)) >>> 2) >>> 0] = yday;
+  GROWABLE_HEAP_I32()[(((tmPtr) + (36)) >>> 2) >>> 0] = -(date.getTimezoneOffset() * 60);
   // Attention: DST is in December in South, and some regions don't have DST at all.
   var start = new Date(date.getFullYear(), 0, 1);
   var summerOffset = new Date(date.getFullYear(), 6, 1).getTimezoneOffset();
   var winterOffset = start.getTimezoneOffset();
   var dst = (summerOffset != winterOffset && date.getTimezoneOffset() == Math.min(winterOffset, summerOffset)) | 0;
-  GROWABLE_HEAP_I32()[(((tmPtr) + (32)) >> 2)] = dst;
+  GROWABLE_HEAP_I32()[(((tmPtr) + (32)) >>> 2) >>> 0] = dst;
 }
 
 function __mmap_js(len, prot, flags, fd, offset_low, offset_high, allocated, addr) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(44, 0, 1, len, prot, flags, fd, offset_low, offset_high, allocated, addr);
+  len >>>= 0;
   var offset = convertI32PairToI53Checked(offset_low, offset_high);
+  allocated >>>= 0;
+  addr >>>= 0;
   try {
     if (isNaN(offset)) return 61;
     var stream = SYSCALLS.getStreamFromFD(fd);
     var res = FS.mmap(stream, len, offset, prot, flags);
     var ptr = res.ptr;
-    GROWABLE_HEAP_I32()[((allocated) >> 2)] = res.allocated;
-    GROWABLE_HEAP_U32()[((addr) >> 2)] = ptr;
+    GROWABLE_HEAP_I32()[((allocated) >>> 2) >>> 0] = res.allocated;
+    GROWABLE_HEAP_U32()[((addr) >>> 2) >>> 0] = ptr;
     return 0;
   } catch (e) {
     if (typeof FS == "undefined" || !(e.name === "ErrnoError")) throw e;
@@ -7316,6 +7393,8 @@ function __mmap_js(len, prot, flags, fd, offset_low, offset_high, allocated, add
 
 function __msync_js(addr, len, prot, flags, fd, offset_low, offset_high) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(45, 0, 1, addr, len, prot, flags, fd, offset_low, offset_high);
+  addr >>>= 0;
+  len >>>= 0;
   var offset = convertI32PairToI53Checked(offset_low, offset_high);
   try {
     if (isNaN(offset)) return 61;
@@ -7329,6 +7408,8 @@ function __msync_js(addr, len, prot, flags, fd, offset_low, offset_high) {
 
 function __munmap_js(addr, len, prot, flags, fd, offset_low, offset_high) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(46, 0, 1, addr, len, prot, flags, fd, offset_low, offset_high);
+  addr >>>= 0;
+  len >>>= 0;
   var offset = convertI32PairToI53Checked(offset_low, offset_high);
   try {
     var stream = SYSCALLS.getStreamFromFD(fd);
@@ -7367,7 +7448,11 @@ function __setitimer_js(which, timeout_ms) {
   return 0;
 }
 
-var __tzset_js = (timezone, daylight, std_name, dst_name) => {
+var __tzset_js = function(timezone, daylight, std_name, dst_name) {
+  timezone >>>= 0;
+  daylight >>>= 0;
+  std_name >>>= 0;
+  dst_name >>>= 0;
   // TODO: Use (malleable) environment variables instead of system settings.
   var currentYear = (new Date).getFullYear();
   var winter = new Date(currentYear, 0, 1);
@@ -7386,8 +7471,8 @@ var __tzset_js = (timezone, daylight, std_name, dst_name) => {
   // Coordinated Universal Time (UTC) and local standard time."), the same
   // as returned by stdTimezoneOffset.
   // See http://pubs.opengroup.org/onlinepubs/009695399/functions/tzset.html
-  GROWABLE_HEAP_U32()[((timezone) >> 2)] = stdTimezoneOffset * 60;
-  GROWABLE_HEAP_I32()[((daylight) >> 2)] = Number(winterOffset != summerOffset);
+  GROWABLE_HEAP_U32()[((timezone) >>> 2) >>> 0] = stdTimezoneOffset * 60;
+  GROWABLE_HEAP_I32()[((daylight) >>> 2) >>> 0] = Number(winterOffset != summerOffset);
   var extractZone = timezoneOffset => {
     // Why inverse sign?
     // Read here https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getTimezoneOffset
@@ -7422,7 +7507,10 @@ var _emscripten_check_blocking_allowed = () => {
 
 var _emscripten_date_now = () => Date.now();
 
-var _emscripten_err = str => err(UTF8ToString(str));
+function _emscripten_err(str) {
+  str >>>= 0;
+  return err(UTF8ToString(str));
+}
 
 var runtimeKeepalivePush = () => {
   runtimeKeepaliveCounter += 1;
@@ -7437,9 +7525,11 @@ var getHeapMax = () => // Stay one Wasm page short of 4GB: while e.g. Chrome is 
 // full 4GB Wasm memories, the size will wrap back to 0 bytes in Wasm side
 // for any code that deals with heap sizes, which would require special
 // casing all heap size related code to treat 0 specially.
-2147483648;
+4294901760;
 
-var _emscripten_get_heap_max = () => getHeapMax();
+function _emscripten_get_heap_max() {
+  return getHeapMax();
+}
 
 var _emscripten_get_now_res = () => {
   // return resolution of get_now, in nanoseconds
@@ -7469,10 +7559,9 @@ var growMemory = size => {
 
 // implicit 0 return to save code size (caller will cast "undefined" into 0
 // anyhow)
-var _emscripten_resize_heap = requestedSize => {
-  var oldSize = GROWABLE_HEAP_U8().length;
-  // With CAN_ADDRESS_2GB or MEMORY64, pointers are already unsigned.
+function _emscripten_resize_heap(requestedSize) {
   requestedSize >>>= 0;
+  var oldSize = GROWABLE_HEAP_U8().length;
   // With multithreaded builds, races can happen (another thread might increase the size
   // in between), so return a failure, and let the caller retry.
   if (requestedSize <= oldSize) {
@@ -7517,7 +7606,7 @@ var _emscripten_resize_heap = requestedSize => {
   }
   err(`Failed to grow the heap from ${oldSize} bytes to ${newSize} bytes, not enough memory!`);
   return false;
-};
+}
 
 var _emscripten_sleep = () => {
   throw "Please compile your program with async support in order to use asynchronous operations like emscripten_sleep";
@@ -7564,18 +7653,20 @@ var getEnvStrings = () => {
 var stringToAscii = (str, buffer) => {
   for (var i = 0; i < str.length; ++i) {
     assert(str.charCodeAt(i) === (str.charCodeAt(i) & 255));
-    GROWABLE_HEAP_I8()[buffer++] = str.charCodeAt(i);
+    GROWABLE_HEAP_I8()[buffer++ >>> 0] = str.charCodeAt(i);
   }
   // Null-terminate the string
-  GROWABLE_HEAP_I8()[buffer] = 0;
+  GROWABLE_HEAP_I8()[buffer >>> 0] = 0;
 };
 
 var _environ_get = function(__environ, environ_buf) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(48, 0, 1, __environ, environ_buf);
+  __environ >>>= 0;
+  environ_buf >>>= 0;
   var bufSize = 0;
   getEnvStrings().forEach((string, i) => {
     var ptr = environ_buf + bufSize;
-    GROWABLE_HEAP_U32()[(((__environ) + (i * 4)) >> 2)] = ptr;
+    GROWABLE_HEAP_U32()[(((__environ) + (i * 4)) >>> 2) >>> 0] = ptr;
     stringToAscii(string, ptr);
     bufSize += string.length + 1;
   });
@@ -7584,11 +7675,13 @@ var _environ_get = function(__environ, environ_buf) {
 
 var _environ_sizes_get = function(penviron_count, penviron_buf_size) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(49, 0, 1, penviron_count, penviron_buf_size);
+  penviron_count >>>= 0;
+  penviron_buf_size >>>= 0;
   var strings = getEnvStrings();
-  GROWABLE_HEAP_U32()[((penviron_count) >> 2)] = strings.length;
+  GROWABLE_HEAP_U32()[((penviron_count) >>> 2) >>> 0] = strings.length;
   var bufSize = 0;
   strings.forEach(string => bufSize += string.length + 1);
-  GROWABLE_HEAP_U32()[((penviron_buf_size) >> 2)] = bufSize;
+  GROWABLE_HEAP_U32()[((penviron_buf_size) >>> 2) >>> 0] = bufSize;
   return 0;
 };
 
@@ -7606,6 +7699,7 @@ function _fd_close(fd) {
 
 function _fd_fdstat_get(fd, pbuf) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(51, 0, 1, fd, pbuf);
+  pbuf >>>= 0;
   try {
     var rightsBase = 0;
     var rightsInheriting = 0;
@@ -7616,12 +7710,12 @@ function _fd_fdstat_get(fd, pbuf) {
       // assume is a character device, like the mouse, we have special APIs for).
       var type = stream.tty ? 2 : FS.isDir(stream.mode) ? 3 : FS.isLink(stream.mode) ? 7 : 4;
     }
-    GROWABLE_HEAP_I8()[pbuf] = type;
-    GROWABLE_HEAP_I16()[(((pbuf) + (2)) >> 1)] = flags;
+    GROWABLE_HEAP_I8()[pbuf >>> 0] = type;
+    GROWABLE_HEAP_I16()[(((pbuf) + (2)) >>> 1) >>> 0] = flags;
     (tempI64 = [ rightsBase >>> 0, (tempDouble = rightsBase, (+(Math.abs(tempDouble))) >= 1 ? (tempDouble > 0 ? (+(Math.floor((tempDouble) / 4294967296))) >>> 0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble))) >>> 0)) / 4294967296))))) >>> 0) : 0) ], 
-    GROWABLE_HEAP_I32()[(((pbuf) + (8)) >> 2)] = tempI64[0], GROWABLE_HEAP_I32()[(((pbuf) + (12)) >> 2)] = tempI64[1]);
+    GROWABLE_HEAP_I32()[(((pbuf) + (8)) >>> 2) >>> 0] = tempI64[0], GROWABLE_HEAP_I32()[(((pbuf) + (12)) >>> 2) >>> 0] = tempI64[1]);
     (tempI64 = [ rightsInheriting >>> 0, (tempDouble = rightsInheriting, (+(Math.abs(tempDouble))) >= 1 ? (tempDouble > 0 ? (+(Math.floor((tempDouble) / 4294967296))) >>> 0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble))) >>> 0)) / 4294967296))))) >>> 0) : 0) ], 
-    GROWABLE_HEAP_I32()[(((pbuf) + (16)) >> 2)] = tempI64[0], GROWABLE_HEAP_I32()[(((pbuf) + (20)) >> 2)] = tempI64[1]);
+    GROWABLE_HEAP_I32()[(((pbuf) + (16)) >>> 2) >>> 0] = tempI64[0], GROWABLE_HEAP_I32()[(((pbuf) + (20)) >>> 2) >>> 0] = tempI64[1]);
     return 0;
   } catch (e) {
     if (typeof FS == "undefined" || !(e.name === "ErrnoError")) throw e;
@@ -7632,8 +7726,8 @@ function _fd_fdstat_get(fd, pbuf) {
 /** @param {number=} offset */ var doReadv = (stream, iov, iovcnt, offset) => {
   var ret = 0;
   for (var i = 0; i < iovcnt; i++) {
-    var ptr = GROWABLE_HEAP_U32()[((iov) >> 2)];
-    var len = GROWABLE_HEAP_U32()[(((iov) + (4)) >> 2)];
+    var ptr = GROWABLE_HEAP_U32()[((iov) >>> 2) >>> 0];
+    var len = GROWABLE_HEAP_U32()[(((iov) + (4)) >>> 2) >>> 0];
     iov += 8;
     var curr = FS.read(stream, GROWABLE_HEAP_I8(), ptr, len, offset);
     if (curr < 0) return -1;
@@ -7649,12 +7743,15 @@ function _fd_fdstat_get(fd, pbuf) {
 
 function _fd_pread(fd, iov, iovcnt, offset_low, offset_high, pnum) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(52, 0, 1, fd, iov, iovcnt, offset_low, offset_high, pnum);
+  iov >>>= 0;
+  iovcnt >>>= 0;
   var offset = convertI32PairToI53Checked(offset_low, offset_high);
+  pnum >>>= 0;
   try {
     if (isNaN(offset)) return 61;
     var stream = SYSCALLS.getStreamFromFD(fd);
     var num = doReadv(stream, iov, iovcnt, offset);
-    GROWABLE_HEAP_U32()[((pnum) >> 2)] = num;
+    GROWABLE_HEAP_U32()[((pnum) >>> 2) >>> 0] = num;
     return 0;
   } catch (e) {
     if (typeof FS == "undefined" || !(e.name === "ErrnoError")) throw e;
@@ -7665,8 +7762,8 @@ function _fd_pread(fd, iov, iovcnt, offset_low, offset_high, pnum) {
 /** @param {number=} offset */ var doWritev = (stream, iov, iovcnt, offset) => {
   var ret = 0;
   for (var i = 0; i < iovcnt; i++) {
-    var ptr = GROWABLE_HEAP_U32()[((iov) >> 2)];
-    var len = GROWABLE_HEAP_U32()[(((iov) + (4)) >> 2)];
+    var ptr = GROWABLE_HEAP_U32()[((iov) >>> 2) >>> 0];
+    var len = GROWABLE_HEAP_U32()[(((iov) + (4)) >>> 2) >>> 0];
     iov += 8;
     var curr = FS.write(stream, GROWABLE_HEAP_I8(), ptr, len, offset);
     if (curr < 0) return -1;
@@ -7684,12 +7781,15 @@ function _fd_pread(fd, iov, iovcnt, offset_low, offset_high, pnum) {
 
 function _fd_pwrite(fd, iov, iovcnt, offset_low, offset_high, pnum) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(53, 0, 1, fd, iov, iovcnt, offset_low, offset_high, pnum);
+  iov >>>= 0;
+  iovcnt >>>= 0;
   var offset = convertI32PairToI53Checked(offset_low, offset_high);
+  pnum >>>= 0;
   try {
     if (isNaN(offset)) return 61;
     var stream = SYSCALLS.getStreamFromFD(fd);
     var num = doWritev(stream, iov, iovcnt, offset);
-    GROWABLE_HEAP_U32()[((pnum) >> 2)] = num;
+    GROWABLE_HEAP_U32()[((pnum) >>> 2) >>> 0] = num;
     return 0;
   } catch (e) {
     if (typeof FS == "undefined" || !(e.name === "ErrnoError")) throw e;
@@ -7699,10 +7799,13 @@ function _fd_pwrite(fd, iov, iovcnt, offset_low, offset_high, pnum) {
 
 function _fd_read(fd, iov, iovcnt, pnum) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(54, 0, 1, fd, iov, iovcnt, pnum);
+  iov >>>= 0;
+  iovcnt >>>= 0;
+  pnum >>>= 0;
   try {
     var stream = SYSCALLS.getStreamFromFD(fd);
     var num = doReadv(stream, iov, iovcnt);
-    GROWABLE_HEAP_U32()[((pnum) >> 2)] = num;
+    GROWABLE_HEAP_U32()[((pnum) >>> 2) >>> 0] = num;
     return 0;
   } catch (e) {
     if (typeof FS == "undefined" || !(e.name === "ErrnoError")) throw e;
@@ -7713,12 +7816,13 @@ function _fd_read(fd, iov, iovcnt, pnum) {
 function _fd_seek(fd, offset_low, offset_high, whence, newOffset) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(55, 0, 1, fd, offset_low, offset_high, whence, newOffset);
   var offset = convertI32PairToI53Checked(offset_low, offset_high);
+  newOffset >>>= 0;
   try {
     if (isNaN(offset)) return 61;
     var stream = SYSCALLS.getStreamFromFD(fd);
     FS.llseek(stream, offset, whence);
     (tempI64 = [ stream.position >>> 0, (tempDouble = stream.position, (+(Math.abs(tempDouble))) >= 1 ? (tempDouble > 0 ? (+(Math.floor((tempDouble) / 4294967296))) >>> 0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble))) >>> 0)) / 4294967296))))) >>> 0) : 0) ], 
-    GROWABLE_HEAP_I32()[((newOffset) >> 2)] = tempI64[0], GROWABLE_HEAP_I32()[(((newOffset) + (4)) >> 2)] = tempI64[1]);
+    GROWABLE_HEAP_I32()[((newOffset) >>> 2) >>> 0] = tempI64[0], GROWABLE_HEAP_I32()[(((newOffset) + (4)) >>> 2) >>> 0] = tempI64[1]);
     if (stream.getdents && offset === 0 && whence === 0) stream.getdents = null;
     // reset readdir state
     return 0;
@@ -7745,10 +7849,13 @@ function _fd_sync(fd) {
 
 function _fd_write(fd, iov, iovcnt, pnum) {
   if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(57, 0, 1, fd, iov, iovcnt, pnum);
+  iov >>>= 0;
+  iovcnt >>>= 0;
+  pnum >>>= 0;
   try {
     var stream = SYSCALLS.getStreamFromFD(fd);
     var num = doWritev(stream, iov, iovcnt);
-    GROWABLE_HEAP_U32()[((pnum) >> 2)] = num;
+    GROWABLE_HEAP_U32()[((pnum) >>> 2) >>> 0] = num;
     return 0;
   } catch (e) {
     if (typeof FS == "undefined" || !(e.name === "ErrnoError")) throw e;
@@ -7756,10 +7863,12 @@ function _fd_write(fd, iov, iovcnt, pnum) {
   }
 }
 
-var _getentropy = (buffer, size) => {
-  randomFill(GROWABLE_HEAP_U8().subarray(buffer, buffer + size));
+function _getentropy(buffer, size) {
+  buffer >>>= 0;
+  size >>>= 0;
+  randomFill(GROWABLE_HEAP_U8().subarray(buffer >>> 0, buffer + size >>> 0));
   return 0;
-};
+}
 
 var stringToUTF8OnStack = str => {
   var size = lengthBytesUTF8(str) + 1;
@@ -7776,9 +7885,10 @@ var stringToNewUTF8 = str => {
 };
 
 var AsciiToString = ptr => {
+  ptr >>>= 0;
   var str = "";
   while (1) {
-    var ch = GROWABLE_HEAP_U8()[ptr++];
+    var ch = GROWABLE_HEAP_U8()[ptr++ >>> 0];
     if (!ch) return str;
     str += String.fromCharCode(ch);
   }
@@ -8296,6 +8406,28 @@ function invoke_vij(index, a1, a2, a3) {
   }
 }
 
+// Argument name here must shadow the `wasmExports` global so
+// that it is recognised by metadce and minify-import-export-names
+// passes.
+function applySignatureConversions(wasmExports) {
+  // First, make a copy of the incoming exports object
+  wasmExports = Object.assign({}, wasmExports);
+  var makeWrapper_pp = f => a0 => f(a0) >>> 0;
+  var makeWrapper_p_ = f => a0 => f(a0) >>> 0;
+  var makeWrapper_p = f => () => f() >>> 0;
+  var makeWrapper_ppp = f => (a0, a1) => f(a0, a1) >>> 0;
+  wasmExports["malloc"] = makeWrapper_pp(wasmExports["malloc"]);
+  wasmExports["strerror"] = makeWrapper_p_(wasmExports["strerror"]);
+  wasmExports["pthread_self"] = makeWrapper_p(wasmExports["pthread_self"]);
+  wasmExports["emscripten_builtin_memalign"] = makeWrapper_ppp(wasmExports["emscripten_builtin_memalign"]);
+  wasmExports["emscripten_main_runtime_thread_id"] = makeWrapper_p(wasmExports["emscripten_main_runtime_thread_id"]);
+  wasmExports["emscripten_stack_get_base"] = makeWrapper_p(wasmExports["emscripten_stack_get_base"]);
+  wasmExports["emscripten_stack_get_end"] = makeWrapper_p(wasmExports["emscripten_stack_get_end"]);
+  wasmExports["_emscripten_stack_alloc"] = makeWrapper_pp(wasmExports["_emscripten_stack_alloc"]);
+  wasmExports["emscripten_stack_get_current"] = makeWrapper_p(wasmExports["emscripten_stack_get_current"]);
+  return wasmExports;
+}
+
 // include: postamble.js
 // === Auto-generated postamble setup entry stuff ===
 Module["addRunDependency"] = addRunDependency;
@@ -8356,10 +8488,10 @@ function callMain(args = []) {
   var argv = stackAlloc((argc + 1) * 4);
   var argv_ptr = argv;
   args.forEach(arg => {
-    GROWABLE_HEAP_U32()[((argv_ptr) >> 2)] = stringToUTF8OnStack(arg);
+    GROWABLE_HEAP_U32()[((argv_ptr) >>> 2) >>> 0] = stringToUTF8OnStack(arg);
     argv_ptr += 4;
   });
-  GROWABLE_HEAP_U32()[((argv_ptr) >> 2)] = 0;
+  GROWABLE_HEAP_U32()[((argv_ptr) >>> 2) >>> 0] = 0;
   try {
     var ret = entryFunction(argc, argv);
     // if we're not running an evented main loop, it's time to exit
