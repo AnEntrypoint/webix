@@ -57,7 +57,7 @@ jobs:
           # branch so the JS host can map the guest framebuffer zero-copy.
           # (They are EMSCRIPTEN_KEEPALIVE too, but listing them here is robust
           # against dead-code elimination at -O levels.)
-          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_blinkenlib_push_input","_blinkenlib_input_pending","_main"'
+          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_blinkenlib_push_input","_blinkenlib_input_pending","_blinkenlib_vm_current","_blinkenlib_vm_set","_blinkenlib_vm_spawn","_main"'
           # Pthreads are required for Blink's fork()/clone()/futex emulation and
           # for real guest threads (emscripten implements fork via web workers +
           # SharedArrayBuffer). Without -pthread the configure probe reports
@@ -464,6 +464,53 @@ jobs:
           } else {
             console.log("PX-smoke RESULT: PROGRESS — exit="+r.exitCode+" tail: "+out.slice(-240));
           }
+          EOF
+
+      - name: X-client smoke (real X client connects to the in-page Xvfb)
+        continue-on-error: true
+        run: |
+          # THE x-apps-work witness: run the patched Xvfb AND a real X client
+          # (xdpyinfo / xsetroot — no keyboard needed) CONCURRENTLY in one blink
+          # instance via runConcurrent, so the client connects over the in-process
+          # AF_UNIX socket and talks the X protocol to the server.
+          test -f containers/Xvfb-patched || { echo "no patched Xvfb"; exit 0; }
+          node --experimental-vm-modules --no-warnings <<'EOF'
+          globalThis.self ??= globalThis;
+          const fs = await import("node:fs");
+          const zlib = await import("node:zlib");
+          const { createBlinkHost } = await import("./src/x86_64-blink.js");
+          const { createApk } = await import("./src/alpine-apk.js");
+          const host = await createBlinkHost({});
+          host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
+          const apk = createApk(host, { fetchImpl: fetch });
+          await apk.addByName("xvfb");                 // server libs
+          // X client(s): xdpyinfo prints screen info + exits 0 on success.
+          for (const pkg of ["xdpyinfo","xsetroot"]) { try { await apk.addByName(pkg); } catch(e) { console.error("apk "+pkg+":", e&&e.message); } }
+          const FS = host.Module.FS;
+          try { const stub = fs.readFileSync("containers/libGL-stub.so"); for (const p of ["/usr/lib/libGL.so.1","/usr/lib/libGL.so.1.2.0"]) { try { FS.writeFile(p, stub); } catch(e) {} } } catch(e) {}
+          FS.writeFile("/usr/bin/Xvfb", fs.readFileSync("containers/Xvfb-patched")); try { FS.chmod("/usr/bin/Xvfb",0o755); } catch(e) {}
+          const xkm = fs.readFileSync("containers/server.xkm");
+          try { FS.mkdir("/tmp"); } catch(e) {}
+          try { FS.mkdir("/tmp/.X11-unix"); } catch(e) {}
+          for (const p of ["/tmp/server-99.xkm","/tmp/server-0.xkm"]) { try { FS.writeFile(p, xkm); } catch(e) {} }
+          const clientPath = FS.analyzePath("/usr/bin/xdpyinfo").exists ? "/usr/bin/xdpyinfo" : "/usr/bin/xsetroot";
+          const clientArgv = clientPath.endsWith("xdpyinfo") ? [] : ["-solid","blue"];
+          console.log("XC-smoke: server=/usr/bin/Xvfb client="+clientPath+" "+JSON.stringify(clientArgv));
+          if (typeof host.runConcurrent !== "function") { console.log("XC-smoke: runConcurrent missing (old blink-core)"); process.exit(0); }
+          const r = await host.runConcurrent(
+            FS.readFile("/usr/bin/Xvfb"), FS.readFile(clientPath),
+            { serverArgv: [":99","-screen","0","640x480x16","-ac","-noreset","-nolock"],
+              clientProgname: clientPath,
+              clientArgv: clientPath.endsWith("xdpyinfo") ? ["-display",":99"] : ["-display",":99","-solid","blue"],
+              clientDelayMs: 1500, overallTimeoutMs: 28000 });
+          console.log("XC-smoke client exit:", r.client.exitCode);
+          console.log("XC-smoke client stdout:", JSON.stringify((r.client.stdout||"").slice(0,1500)));
+          console.log("XC-smoke client stderr:", JSON.stringify((r.client.stderr||"").slice(0,800)));
+          console.log("XC-smoke server stderr tail:", JSON.stringify((r.server.stderr||"").slice(-400)));
+          const cout = (r.client.stdout||"")+(r.client.stderr||"");
+          const connected = /dimensions:|screen #|version number|depth of root|XFree86|X.Org|number of screens/i.test(cout) || r.client.exitCode===0;
+          if (connected) console.log("XC-smoke RESULT: SUCCESS — a real X client connected to the in-page Xvfb and talked X11");
+          else console.log("XC-smoke RESULT: PROGRESS — client exit="+r.client.exitCode+" out="+cout.slice(0,200));
           EOF
 
       - name: Commit rebuilt artifacts

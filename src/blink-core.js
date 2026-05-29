@@ -131,12 +131,18 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   // paused) and schedule the resume on a fresh stack via setTimeout(0), which
   // also lets the JS event loop (rAF/blits/input) breathe between slices.
   const resumeSoon=()=>{ if(exited) return; setTimeout(()=>{ if(!exited){ try{ Module._blinkenlib_preempt_resume() }catch(e){ settleExit(255) } } },0); };
+  // The signal/exit callbacks delegate to a swappable handler so the run model
+  // can be a single foreground run (default) OR a cooperative multi-VM scheduler
+  // (runConcurrent) where a per-call flag records preempt/exit for the VM that
+  // was active when callMain/resume was invoked.
+  let activeHandler=null;
   const signalCb=Module.addFunction((sig,code)=>{
+    if(activeHandler){ activeHandler.onSignal(sig,code); return }
     if(sig!==SIGTRAP){ lastSignal={sig,code}; settleExit(128+sig); return }
     if(code===BLINK_PREEMPT) resumeSoon();
     else if(code===BLINK_FAKE_TTY){ if(options.onTtyPause) options.onTtyPause(); else Module._blinkenlib_faketty_resume() }
   },"vii");
-  const exitCb=Module.addFunction((code)=>{ settleExit(code) },"vi");
+  const exitCb=Module.addFunction((code)=>{ if(activeHandler){ activeHandler.onExit(code); return } settleExit(code) },"vi");
   Module.callMain([signalCb.toString(), exitCb.toString()]);
   const clstruct=Module._blinkenlib_get_clstruct();
   const argcPtr=Module._blinkenlib_get_argc_string();
@@ -298,6 +304,78 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       Module._blinkenlib_run();
       const exitCode=await done;
       return { exitCode, stdout:decode(outBytes), stderr:decode(errBytes), signal:lastSignal };
+    },
+    // Run a long-lived SERVER guest and a CLIENT guest concurrently in this one
+    // wasm instance so they share the MEMFS + in-process AF_UNIX sockets (X
+    // server + X client). Cooperative: each VM runs MAX_CYCLES then preempts;
+    // the scheduler switches the active VM (blinkenlib_vm_set) and resumes the
+    // other. Resolves when the CLIENT exits (the server keeps serving) or on
+    // serverTimeoutMs. Returns the client's exit + both VMs' captured output.
+    async runConcurrent(serverBytes, clientBytes, {
+      serverArgv=[], serverProgname="/xserver",
+      clientArgv=[], clientProgname="/xclient",
+      clientDelayMs=600, overallTimeoutMs=30000,
+    }={}){
+      if(exitDeferred) throw new Error("blink-core: a run is already in flight");
+      const writeProg=(p,bytes)=>{ const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); try{FS.unlink(p)}catch(_){} const fd=FS.open(p,"w+"); FS.write(fd,u8,0,u8.length,0); FS.close(fd); FS.chmod(p,0o755); };
+      writeProg("/xserver",serverBytes); writeProg("/xclient",clientBytes);
+      const vms={};                       // name -> {handle, out:[], err:[], done:false, code:null}
+      const mk=()=>({handle:null,out:[],err:[],done:false,code:null});
+      let current=null;                   // name of the VM whose run/resume is in flight
+      // Route stdout/stderr to the active VM's buffers.
+      // (outBytes/errBytes module globals are repointed per slice below.)
+      const sched={
+        onSignal:(sig,code)=>{
+          const v=vms[current];
+          if(sig!==SIGTRAP){ if(v){v.done=true; v.code=128+sig;} return }
+          if(code===BLINK_PREEMPT){ /* slice done; scheduler will resume later */ pendingPreempt=true; }
+          else if(code===BLINK_FAKE_TTY){ Module._blinkenlib_faketty_resume(); }
+        },
+        onExit:(code)=>{ const v=vms[current]; if(v){ v.done=true; v.code=code; } },
+      };
+      let pendingPreempt=false;
+      activeHandler=sched;
+      const setActive=(name)=>{ current=name; const v=vms[name]; outBytes=v.out; errBytes=v.err; Module._blinkenlib_vm_set(v.handle); };
+      // Spawn server VM and prime it (loads + sets up, no run yet via _start? we
+      // use vm_spawn which LoadPrograms; first slice is via _run).
+      const spawn=(name,progname,argvArr)=>{
+        writeStr(prognamePtr,progname,1024);
+        writeArgv(argcPtr, argvArr.length?argvArr:[progname], 4096);
+        writeStr(argvPtr,"",4096);
+        vms[name]=mk(); current=name; outBytes=vms[name].out; errBytes=vms[name].err;
+        vms[name].handle=Module._blinkenlib_vm_spawn(0);   // fresh (m,s), current
+      };
+      // The program path is read from progname; vm_spawn loads progname_string
+      // which we point at /xserver|/xclient via writeStr(prognamePtr,...). But
+      // LoadProgram opens `progname` as the file — so progname must BE the path.
+      spawn("server","/xserver",["Xvfb",...serverArgv]);
+      // Kick the server's first slice (run to first preempt) then it's paused.
+      const runSlice=(name)=>{ setActive(name); pendingPreempt=false; try{ if(vms[name].started){ Module._blinkenlib_preempt_resume(); } else { vms[name].started=true; Module._blinkenlib_run(); } }catch(e){ vms[name].done=true; vms[name].code=255; } };
+      const clientDone=new Promise((resolve)=>{
+        const t0=Date.now();
+        let clientSpawned=false;
+        const tick=()=>{
+          // server slice
+          if(!vms.server.done) runSlice("server");
+          // bring up client after a short warmup so the listener is ready
+          if(!clientSpawned && Date.now()-t0>=clientDelayMs){
+            spawn("client","/xclient",[clientProgname.split("/").pop(),...clientArgv]);
+            clientSpawned=true;
+          }
+          if(clientSpawned && !vms.client.done) runSlice("client");
+          const overall=Date.now()-t0>overallTimeoutMs;
+          if((clientSpawned && vms.client.done) || overall){
+            resolve({ timedOut:overall, client:vms.client||null, server:vms.server });
+            return;
+          }
+          setTimeout(tick,0);
+        };
+        setTimeout(tick,0);
+      });
+      const r=await clientDone;
+      activeHandler=null;
+      const dec=(v)=>({exitCode:v?(v.done?v.code:"RUNNING"):null, stdout:decode(v?v.out:[]), stderr:decode(v?v.err:[])});
+      return { timedOut:r.timedOut, client:dec(r.client), server:dec(r.server) };
     },
     pushStdin(bytes){ for(const b of [...bytes].reverse()) stdinQueue.unshift(b) },
     async runShellScript(busyboxBytes, scriptText, { argv=[], progname="/program" }={}){
