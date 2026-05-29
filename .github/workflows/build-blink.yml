@@ -299,6 +299,10 @@ jobs:
           # 4GB MAXIMUM_MEMORY + mprotect=0 shim are meant to clear the two walls
           # that previously killed it (Cannot enlarge memory / __syscall_mprotect).
           # Diagnostic (continue-on-error): logs how far the real X server gets.
+          # BLINK_STRACE makes blink log guest syscalls to stderr so we can see
+          # which one Xvfb loops on while it grows the heap to 4GB. The CI log
+          # tail shows the repeating call. (Diagnostic.)
+          export BLINK_STRACE=1
           node --experimental-vm-modules --no-warnings <<'EOF'
           globalThis.self ??= globalThis;
           const fs = await import("node:fs");
