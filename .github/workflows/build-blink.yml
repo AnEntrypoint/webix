@@ -340,3 +340,80 @@ jobs:
           SHA=$(sha1sum containers/blinkenlib.wasm | cut -c1-12)
           git commit -m "ci(blink): rebuild blinkenlib.wasm $SHA from $BLINK_REPO@$BLINK_REF"
           git push
+
+  # Decisive test of the X-server diagnosis: the threaded build aborts because
+  # emscripten's -pthread SharedArrayBuffer growMemory cannot grow past
+  # MAXIMUM_MEMORY (it aborts the runtime). A NON-threaded build uses a regular
+  # growable ArrayBuffer that grows fine to 4GB. This job builds a single-thread
+  # blink (no -pthread / no shared memory) and runs the Alpine xvfb smoke against
+  # it. If Xvfb clears the memory wall here, a non-threaded X-only VM is the path.
+  xserver-nothreads-probe:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.69
+      - name: Clone blink fork
+        env:
+          BLINK_REPO: ${{ inputs.blink_repo || 'lanmower/blink' }}
+          BLINK_REF: ${{ inputs.blink_ref || 'libblink-portabox' }}
+        run: git clone --depth 1 --branch "$BLINK_REF" "https://github.com/$BLINK_REPO.git" libblink
+      - name: Configure + build NON-threaded blink (regular growable ArrayBuffer)
+        working-directory: libblink
+        run: |
+          EXPORTS='"UTF8ToString","stringToNewUTF8","AsciiToString","FS","callMain","addFunction","wasmExports"'
+          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_blinkenlib_push_input","_blinkenlib_input_pending","_main"'
+          # NO -pthread, NO shared memory -> a normal growable ArrayBuffer that can
+          # actually grow to MAXIMUM_MEMORY=4GB without the threaded growMemory abort.
+          EFLAGS="-sENVIRONMENT=node,web,worker -sALLOW_MEMORY_GROWTH=1 -sABORTING_MALLOC=0 -sMAXIMUM_MEMORY=4294967296 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 -lnodefs.js"
+          emconfigure ./configure --disable-all --enable-sockets --enable-nonposix \
+            LDFLAGS="$EFLAGS" \
+            CPPFLAGS="-DHTML -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_GNU_SOURCE"
+          # Force the feature defines the emconfigure run-probes cannot detect under wasm.
+          CFG=config.h
+          sed -i 's@^#define DISABLE_SOCKETS@// #define DISABLE_SOCKETS@' "$CFG"
+          sed -i 's@^#define DISABLE_NONPOSIX@// #define DISABLE_NONPOSIX@' "$CFG"
+          for SYM in HAVE_PIPE2 HAVE_DUP3 HAVE_MAP_SHARED HAVE_MAP_ANONYMOUS HAVE_SCHED_YIELD \
+                     HAVE_SCHED_H HAVE_GETENTROPY HAVE_CLOCK_SETTIME HAVE_STRCHRNUL HAVE_MEMCCPY \
+                     HAVE_REALPATH HAVE_SEEKDIR HAVE_PREADV HAVE_VASPRINTF HAVE_WCWIDTH \
+                     HAVE_FDATASYNC HAVE_SYNC HAVE_STRUCT_TIMEZONE; do
+            sed -i "s@^// #define $SYM\$@#define $SYM@" "$CFG"
+          done
+          emmake make o//blink/blinkenlib.js -j$(nproc)
+          WASM=$(find . -name 'blinkenlib.wasm' -type f | head -1)
+          JS=$(find . -name 'blinkenlib.js' -type f | head -1)
+          cp "$WASM" ../containers/blinkenlib-st.wasm
+          cp "$JS"   ../containers/blinkenlib-st.js
+          ls -la ../containers/blinkenlib-st.*
+      - name: X-server smoke on the NON-threaded build
+        working-directory: .
+        run: |
+          node --experimental-vm-modules --no-warnings <<'EOF'
+          globalThis.self ??= globalThis;
+          const fs = await import("node:fs");
+          const zlib = await import("node:zlib");
+          const { createBlinkHost } = await import("./src/x86_64-blink.js");
+          const { createApk } = await import("./src/alpine-apk.js");
+          // Point the node host at the single-thread artifacts we just built.
+          const host = await createBlinkHost({ wasmPath: "containers/blinkenlib-st.wasm", gluePath: "containers/blinkenlib-st.js" });
+          host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
+          const apk = createApk(host, { fetchImpl: fetch });
+          await apk.addByName("xvfb");
+          const FS = host.Module.FS;
+          if (!FS.analyzePath("/usr/bin/Xvfb").exists) { console.error("Xvfb not installed"); process.exit(1); }
+          const bytes = FS.readFile("/usr/bin/Xvfb");
+          console.log("ST-X-smoke: /usr/bin/Xvfb present,", bytes.length, "bytes; exec -version on NON-threaded blink ...");
+          const r = await Promise.race([
+            host.runElf(bytes, { progname: "/usr/bin/Xvfb", argv: ["Xvfb", "-version"] }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("timeout 60s")), 60000)),
+          ]);
+          console.log("ST-X-smoke EXIT:", r.exitCode);
+          console.log("ST-X-smoke stdout:", JSON.stringify((r.stdout||"").slice(0,600)));
+          console.log("ST-X-smoke stderr:", JSON.stringify((r.stderr||"").slice(0,600)));
+          const out = (r.stdout||"") + (r.stderr||"");
+          if (/Cannot enlarge memory/.test(out)) { console.error("ST-X-smoke: STILL hit the memory wall (diagnosis wrong)"); process.exit(2); }
+          console.log("ST-X-smoke RESULT: NON-threaded build cleared the growMemory abort; Xvfb exit", r.exitCode);
+          EOF
