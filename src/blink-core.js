@@ -317,6 +317,7 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       clientDelayMs=600, overallTimeoutMs=30000,
     }={}){
       if(exitDeferred) throw new Error("blink-core: a run is already in flight");
+      const FS=Module.FS;
       const writeProg=(p,bytes)=>{ const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); try{FS.unlink(p)}catch(_){} const fd=FS.open(p,"w+"); FS.write(fd,u8,0,u8.length,0); FS.close(fd); FS.chmod(p,0o755); };
       writeProg("/xserver",serverBytes); writeProg("/xclient",clientBytes);
       const vms={};                       // name -> {handle, out:[], err:[], done:false, code:null}
