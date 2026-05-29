@@ -335,10 +335,16 @@ jobs:
           // A working server either keeps running (we time out = it's serving)
           // or prints screen/extension init; both are success. An OOM or a
           // missing-symbol/server-error is failure.
-          console.log("X-smoke: Xvfb +stub libGL ("+stub.length+"B stub), exec ':99 -screen 0 640x480x16 -ac -noreset' ...");
+          // -nolock: skip LockServer(). Xorg's os/utils.c creates the display
+          // lock /tmp/.Xnn-lock via link(); emscripten MEMFS returns EMLINK
+          // ("Too many links") for hardlinks, so the lock step aborts the
+          // server even though init otherwise reached it. -nolock removes that
+          // dependency (single-tenant in-page server; no competing X server).
+          try { for (const f of (FS.readdir("/tmp")||[])) { if (f === "." || f === "..") continue; try { FS.unlink("/tmp/"+f); } catch(e) {} } } catch(e) {}
+          console.log("X-smoke: Xvfb +stub libGL ("+stub.length+"B stub), exec ':99 -screen 0 640x480x16 -ac -noreset -nolock' ...");
           let timedOut = false;
           const r = await Promise.race([
-            host.runElf(bytes, { progname: "/usr/bin/Xvfb", argv: ["Xvfb", ":99", "-screen", "0", "640x480x16", "-ac", "-noreset"] }),
+            host.runElf(bytes, { progname: "/usr/bin/Xvfb", argv: ["Xvfb", ":99", "-screen", "0", "640x480x16", "-ac", "-noreset", "-nolock"] }),
             new Promise((res) => setTimeout(() => { timedOut = true; res({ exitCode: "TIMEOUT(serving)", stdout: "", stderr: "" }); }, 30000)),
           ]);
           console.log("X-smoke EXIT:", r.exitCode);
