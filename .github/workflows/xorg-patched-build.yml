@@ -1,0 +1,136 @@
+name: xorg-patched-build
+
+# Build a GL-less Xvfb whose XKB keymap loads a PRECOMPILED .xkm directly,
+# removing the xkbcomp fork+exec from the keymap path (wasm/blink has no fork).
+# Output committed to the repo: containers/Xvfb-patched (the musl ELF) +
+# containers/server.xkm (the precompiled keymap). The blink X-smoke then runs
+# this Xvfb instead of the stock Alpine package and should reach the dispatch
+# loop with no fork.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:3.21
+    steps:
+      - name: Checkout webix
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          apk add --no-cache \
+            build-base autoconf automake libtool pkgconf util-macros \
+            xorgproto libxfont2-dev libxkbfile-dev pixman-dev \
+            libxshmfence-dev libxext-dev libx11-dev libxau-dev libxdmcp-dev \
+            xtrans libxcb-dev xcb-util-dev libxfont2 libdrm-dev \
+            font-util openssl-dev zlib-dev xkbcomp xkeyboard-config \
+            wget git bash gettext-dev libbsd-dev python3 file xz
+
+      - name: Fetch xorg-server source (match Alpine 21.1.x)
+        run: |
+          set -eux
+          XV=21.1.16
+          wget -q "https://www.x.org/releases/individual/xserver/xorg-server-${XV}.tar.xz" -O xorg-server.tar.xz \
+            || wget -q "https://www.x.org/archive/individual/xserver/xorg-server-${XV}.tar.xz" -O xorg-server.tar.xz
+          tar xf xorg-server.tar.xz
+          mv "xorg-server-${XV}" xsrc
+          echo "XV=$XV" >> "$GITHUB_ENV"
+
+      - name: Patch ddxLoad.c — load precompiled keymap, skip xkbcomp fork
+        run: |
+          set -eux
+          F=xsrc/xkb/ddxLoad.c
+          test -f "$F"
+          # Replace the body of RunXkbComp so it does NOT Popen/fork xkbcomp.
+          # Instead it returns the keymap NAME (server-<display>); the server then
+          # LoadXKM-reads <outdir>/<name>.xkm, which we pre-place at runtime. This
+          # is the single fork on the keymap path; removing it lets the keyboard
+          # init under blink (no fork). A python rewrite keeps it robust to spacing.
+          python3 - "$F" <<'PY'
+          import re, sys
+          p = sys.argv[1]
+          s = open(p).read()
+          # Find "RunXkbComp(...) {" and replace its whole body with a stub that
+          # builds the "server-<display>" name and returns it (no Popen).
+          start = s.index("RunXkbComp(xkbcomp_buffer_callback")
+          brace = s.index("{", start)
+          # find matching close brace
+          depth = 0; i = brace
+          while i < len(s):
+              if s[i] == '{': depth += 1
+              elif s[i] == '}':
+                  depth -= 1
+                  if depth == 0: break
+              i += 1
+          end = i + 1
+          stub = ("{\n"
+                  "    /* blink/wasm: no fork available. The keymap is precompiled\n"
+                  "       and placed at <outdir>/server-<display>.xkm before start.\n"
+                  "       Skip Popen(xkbcomp); just return the expected name so\n"
+                  "       LoadXKM reads the bundled .xkm. */\n"
+                  "    char keymap[PATH_MAX];\n"
+                  "    (void)callback; (void)userdata;\n"
+                  "    snprintf(keymap, sizeof(keymap), \"server-%s\", display);\n"
+                  "    return XNFstrdup(keymap);\n"
+                  "}")
+          s = s[:brace] + stub + s[end:]
+          open(p, "w").write(s)
+          print("patched RunXkbComp")
+          PY
+          grep -n "no fork available" "$F"
+
+      - name: Configure (GL-less) + build Xvfb
+        run: |
+          set -eux
+          cd xsrc
+          ./configure \
+            --prefix=/usr \
+            --disable-glx --disable-dri --disable-dri2 --disable-dri3 \
+            --disable-glamor --disable-dpms \
+            --enable-xvfb --disable-xorg --disable-xnest --disable-xwayland \
+            --disable-xephyr --disable-xquartz --disable-xwin \
+            --disable-docs --disable-devel-docs --disable-unit-tests \
+            --without-dtrace --disable-config-udev --disable-systemd-logind \
+            CFLAGS="-O2 -fcommon"
+          make -j$(nproc) V=0
+          ls -la hw/vfb/Xvfb
+          ./hw/vfb/Xvfb -version 2>&1 | head -3 || true
+
+      - name: Generate precompiled server.xkm with host xkbcomp
+        run: |
+          set -eux
+          # Compile the default us/pc105 keymap to a .xkm using the host xkbcomp.
+          # setxkbmap may be absent; feed a fixed RMLVO keymap to xkbcomp -xkm.
+          mkdir -p out
+          cat > /tmp/keymap.xkb <<'KM'
+          xkb_keymap {
+            xkb_keycodes  { include "evdev+aliases(qwerty)" };
+            xkb_types     { include "complete" };
+            xkb_compat    { include "complete" };
+            xkb_symbols   { include "pc+us+inet(evdev)" };
+            xkb_geometry  { include "pc(pc105)" };
+          };
+          KM
+          xkbcomp -xkm /tmp/keymap.xkb out/server.xkm
+          ls -la out/server.xkm
+
+      - name: Stage artifacts into containers/
+        run: |
+          set -eux
+          mkdir -p containers
+          cp xsrc/hw/vfb/Xvfb containers/Xvfb-patched
+          cp out/server.xkm   containers/server.xkm
+          ls -la containers/Xvfb-patched containers/server.xkm
+          file containers/Xvfb-patched || true
+
+      - name: Commit artifacts
+        run: |
+          set -eux
+          git config user.email "ci@webix"
+          git config user.name "webix-ci"
+          git add containers/Xvfb-patched containers/server.xkm
+          git commit -m "xorg: GL-less Xvfb-patched (no-fork keymap) + precompiled server.xkm" || echo "no changes"
+          git push || echo "push failed (will retry via rebase in a follow-up)"
