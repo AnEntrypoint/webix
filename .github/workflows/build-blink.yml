@@ -69,19 +69,17 @@ jobs:
           # serve time (set in the consuming app).
           # 4GB max linear memory (wasm32 ceiling = 65536 pages = 4GiB; the
           # -pthread shared-memory build supports it on emscripten 3.1.69). The
-          # old 2GB cap made real X servers (Xvfb wanted 2GB+4KB at startup)
-          # fail with "Cannot enlarge memory"; 4GB gives the headroom.
+          # real blocker for big dynamic binaries (Xorg/Xvfb) is NOT this flag but
+          # blink's memory ceilings (tunables.h kMaxResident/kMaxVirtual): blink
+          # eagerly host-backs guest pages, so a guest mmap sized against a 64GB
+          # ceiling makes blink ask emscripten for memory it cannot grow into
+          # ("Cannot enlarge memory", fatal). The fork now caps those tunables to
+          # fit the wasm budget so the mmap/brk guards return a graceful ENOMEM
+          # instead. 4GB here still gives headroom under that cap.
+          # (__syscall_mprotect ENOSYS warnings from emscripten are non-fatal —
+          # NOJIT means no exec-page protection is needed; Xvfb runs past them.)
           PTHREAD_FLAGS="-pthread -sPTHREAD_POOL_SIZE=8 -sMAXIMUM_MEMORY=4294967296"
-          # mprotect shim: emscripten stubs ___syscall_mprotect to ENOSYS, which
-          # breaks musl's allocator under big dynamic binaries (Xorg spammed
-          # "unsupported syscall: __syscall_mprotect"). wasm linear memory has no
-          # page protection, so mprotect is correctly a success no-op -> return 0.
-          cat > emlib-mprotect.js <<'JSLIB'
-          addToLibrary({
-            __syscall_mprotect: function(addr, len, prot) { return 0; },
-          });
-          JSLIB
-          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS --js-library $(pwd)/emlib-mprotect.js -lnodefs.js -lidbfs.js"
+          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS -lnodefs.js -lidbfs.js"
           # -pthread also has to reach the C compiler (not just the linker) so
           # threading intrinsics and the pthread headers are wired in.
           export CFLAGS="-pthread"
