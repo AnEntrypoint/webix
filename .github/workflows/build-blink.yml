@@ -505,7 +505,12 @@ jobs:
               clientDelayMs: 12000, overallTimeoutMs: 50000 });
           console.log("XC-smoke server exit:", r.server.exitCode);
           console.log("XC-smoke server stdout:", JSON.stringify((r.server.stdout||"").slice(0,3500)));
-          console.log("XC-smoke server stderr:", JSON.stringify((r.server.stderr||"").slice(0,3500)));
+          { const se=r.server.stderr||"";
+            const epollHits=(se.match(/\[epoll\] wait/g)||[]).length;
+            const acceptHits=(se.match(/\[unixsock\] accept/g)||[]).length;
+            console.log("XC-smoke server diag: epoll-rc>0 hits="+epollHits+" accept-calls="+acceptHits+" stderr-len="+se.length);
+            const ai=se.indexOf("[unixsock] accept"); if(ai>=0) console.log("XC-smoke server around-accept:", JSON.stringify(se.slice(ai,ai+600)));
+          }
           console.log("XC-smoke client exit:", r.client.exitCode);
           console.log("XC-smoke client stdout:", JSON.stringify((r.client.stdout||"").slice(0,1500)));
           console.log("XC-smoke client stderr:", JSON.stringify((r.client.stderr||"").slice(0,800)));
