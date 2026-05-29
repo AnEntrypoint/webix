@@ -497,6 +497,7 @@ jobs:
           const clientArgv = clientPath.endsWith("xdpyinfo") ? [] : ["-solid","blue"];
           console.log("XC-smoke: server=/usr/bin/Xvfb client="+clientPath+" "+JSON.stringify(clientArgv));
           if (typeof host.runConcurrent !== "function") { console.log("XC-smoke: runConcurrent missing (old blink-core)"); process.exit(0); }
+          try { host.Module.ENV = host.Module.ENV || {}; host.Module.ENV.BLINK_STRACE = "2"; } catch(e) {}
           const r = await host.runConcurrent(
             FS.readFile("/usr/bin/Xvfb"), FS.readFile(clientPath),
             { serverArgv: [":99","-screen","0","640x480x16","-ac","-noreset","-nolock"],
@@ -504,6 +505,11 @@ jobs:
               clientArgv: clientPath.endsWith("xdpyinfo") ? ["-display",":99"] : ["-display",":99","-solid","blue"],
               clientDelayMs: 6000, overallTimeoutMs: 120000 });
           console.log("XC-smoke server exit:", r.server.exitCode);
+          try { const sl=FS.readFile("/em-strace.log",{encoding:"utf8"}).split("\n");
+            const idx=sl.findIndex(l=>/accept.*-> 10|= 10\b/.test(l));
+            const from=idx>=0?Math.max(0,idx-2):Math.max(0,sl.length-80);
+            console.log("XC-smoke strace (around accept of fd 10):\n"+sl.slice(from,from+80).join("\n"));
+          } catch(e){ console.log("XC-smoke strace: (none) "+(e&&e.message)); }
           for (const sl of [0,1]) { try { console.log("XC-smoke thr-"+sl+":", FS.readFile("/em-thr-"+sl+".run",{encoding:"utf8"}).trim()); } catch(e){ console.log("XC-smoke thr-"+sl+": (never started)"); } }
           try { const ul=FS.readFile("/em-unixsock.log",{encoding:"utf8"}); const ull=ul.split("\n"); console.log("XC-smoke unixsock.log ("+ull.length+" lines, tail):\n"+ull.slice(-40).join("\n")); } catch(e){ console.log("XC-smoke unixsock.log: (none)"); }
           console.log("XC-smoke server stdout:", JSON.stringify((r.server.stdout||"").slice(0,3500)));
