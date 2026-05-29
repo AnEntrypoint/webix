@@ -41,7 +41,11 @@ function makeInstantiateWasm(wasmResponsePromise){
 export async function createBlinkHostBrowser(options={}){
   const wasmUrl=options.wasmUrl??"/containers/blinkenlib.wasm";
   const glueUrl=options.glueUrl??"/containers/blinkenlib.js";
-  const factory=(await import(glueUrl)).default;
+  // The glue is a runtime asset served at glueUrl, NOT a build-time module.
+  // The magic comments tell bundlers (webpack/turbopack/vite) to leave this as
+  // a native runtime import() instead of trying to resolve '/containers/...' at
+  // build time (which fails with "server relative imports not implemented").
+  const factory=(await import(/* webpackIgnore: true */ /* @vite-ignore */ glueUrl)).default;
   // If raw bytes were supplied (tests), keep the legacy path; else stream-compile.
   if(options.wasmBinary){
     return createBlinkCore({ wasmBinary:options.wasmBinary, factory, options });

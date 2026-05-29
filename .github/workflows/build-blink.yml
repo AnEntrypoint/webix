@@ -153,8 +153,14 @@ jobs:
           # so there is no libc/loader dependency inside the guest.
           gcc -static -nostdlib -O2 -fno-stack-protector -o containers/fbtest.elf containers/fbtest.c
           gcc -static -nostdlib -O2 -fno-stack-protector -o containers/inputtest.elf containers/inputtest.c
-          file containers/fbtest.elf containers/inputtest.elf || true
-          ls -la containers/fbtest.elf containers/inputtest.elf
+          # xappdemo: the in-guest GUI app (draggable window -> framebuffer).
+          # Two builds: a bounded SMOKE build that exits after a few frames so the
+          # node smoke terminates, and the LIVE build that loops forever for the
+          # browser desktop.
+          gcc -static -nostdlib -O2 -fno-stack-protector -DXAPP_SMOKE_FRAMES=3 -o containers/xappdemo-smoke.elf containers/xappdemo.c
+          gcc -static -nostdlib -O2 -fno-stack-protector -o containers/xappdemo.elf containers/xappdemo.c
+          file containers/fbtest.elf containers/inputtest.elf containers/xappdemo.elf || true
+          ls -la containers/fbtest.elf containers/inputtest.elf containers/xappdemo.elf
 
       - name: Smoke test (node, hand-built ELF)
         run: |
@@ -237,6 +243,43 @@ jobs:
           console.log("input smoke ok:", JSON.stringify(r.stdout.trim()));
           EOF
 
+      - name: GUI app smoke (xappdemo -> framebuffer window)
+        run: |
+          # Run the bounded xappdemo: push a mouse-move + title-bar button-down
+          # first, then run it; assert it registered an 800x600 framebuffer with
+          # a window region (non-background pixels in the window's title-bar row).
+          node --experimental-vm-modules --no-warnings <<'EOF'
+          globalThis.self ??= globalThis;
+          const { createBlinkHost } = await import("./src/x86_64-blink.js");
+          const fs = await import("node:fs");
+          const host = await createBlinkHost({});
+          // move mouse over the title bar (window starts at 220,150, title h=28)
+          host.pushInput({ type: "motion", x: 260, y: 162 });
+          host.pushInput({ type: "button", button: 0, down: 1 });
+          const elf = fs.readFileSync("containers/xappdemo-smoke.elf");
+          const r = await host.runElf(elf, { argv: ["xappdemo"], progname: "/program" });
+          const info = host.fbInfo();
+          if (!info || info.width !== 800 || info.height !== 600) {
+            console.error("gui smoke: geometry wrong", info); process.exit(1);
+          }
+          const view = host.fbView();
+          if (!view) { console.error("gui smoke: no fbView"); process.exit(1); }
+          // Title bar is blue RGBA(40,90,200) at ~(220,150). Sample that pixel.
+          const px = (x, y) => {
+            const o = y * view.stride + x * 4;
+            return [view.pixels[o], view.pixels[o+1], view.pixels[o+2]];
+          };
+          const tb = px(240, 158); // inside title bar
+          const bg = px(5, 5);     // desktop background corner
+          const isBlue = tb[2] > 150 && tb[2] > tb[0] + 40;
+          const differs = tb[0] !== bg[0] || tb[1] !== bg[1] || tb[2] !== bg[2];
+          if (!isBlue || !differs) {
+            console.error("gui smoke: window title bar not rendered", { tb, bg });
+            process.exit(1);
+          }
+          console.log("gui smoke ok: 800x600 window rendered, title bar at (240,158)=", tb, "gen=", info.generation);
+          EOF
+
       - name: Commit rebuilt artifacts
         env:
           BLINK_REPO: ${{ inputs.blink_repo || 'lanmower/blink' }}
@@ -244,7 +287,7 @@ jobs:
         run: |
           git config user.email "github-actions@users.noreply.github.com"
           git config user.name "github-actions"
-          git add containers/blinkenlib.wasm containers/blinkenlib.js containers/fbtest.elf containers/fbtest.c containers/inputtest.elf containers/inputtest.c
+          git add containers/blinkenlib.wasm containers/blinkenlib.js containers/fbtest.elf containers/fbtest.c containers/inputtest.elf containers/inputtest.c containers/xappdemo.elf containers/xappdemo-smoke.elf containers/xappdemo.c
           if git diff --cached --quiet; then
             echo "no changes"; exit 0
           fi
