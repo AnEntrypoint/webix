@@ -362,7 +362,7 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
         const tick=()=>{
           // Give the server several slices per tick so it reaches its listening
           // dispatch loop quickly (font/extension init is many MAX_CYCLES slices).
-          const serverSlices = clientSpawned ? 4 : 24;
+          const serverSlices = clientSpawned ? 8 : 200;
           for(let k=0;k<serverSlices && !vms.server.done;k++) runSlice("server");
           // bring up client after a warmup so the listener is bound + accepting
           if(!clientSpawned && Date.now()-t0>=clientDelayMs){
