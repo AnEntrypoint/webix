@@ -58,7 +58,8 @@
     "./blink-browser": "./src/x86_64-blink-browser.js",
     "./blink-core": "./src/blink-core.js",
     "./display": "./src/display.js",
-    "./kernel": "./src/kernel.js"
+    "./kernel": "./src/kernel.js",
+    "./alpine-apk": "./src/alpine-apk.js"
   },
   "browser": "./src/browser.js",
   "dependencies": {
