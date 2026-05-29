@@ -153,11 +153,10 @@ jobs:
           # so there is no libc/loader dependency inside the guest.
           gcc -static -nostdlib -O2 -fno-stack-protector -o containers/fbtest.elf containers/fbtest.c
           gcc -static -nostdlib -O2 -fno-stack-protector -o containers/inputtest.elf containers/inputtest.c
-          # xappdemo: the in-guest GUI app (draggable window -> framebuffer).
-          # Two builds: a bounded SMOKE build that exits after a few frames so the
-          # node smoke terminates, and the LIVE build that loops forever for the
-          # browser desktop.
-          gcc -static -nostdlib -O2 -fno-stack-protector -DXAPP_SMOKE_FRAMES=3 -o containers/xappdemo-smoke.elf containers/xappdemo.c
+          # xappdemo: the in-guest GUI app (draggable window -> framebuffer),
+          # render-once model -- one frame per run, the host re-runs it each
+          # animation tick (runElf is synchronous, so a forever loop would freeze
+          # the page). No separate smoke build needed.
           gcc -static -nostdlib -O2 -fno-stack-protector -o containers/xappdemo.elf containers/xappdemo.c
           file containers/fbtest.elf containers/inputtest.elf containers/xappdemo.elf || true
           ls -la containers/fbtest.elf containers/inputtest.elf containers/xappdemo.elf
@@ -245,39 +244,40 @@ jobs:
 
       - name: GUI app smoke (xappdemo -> framebuffer window)
         run: |
-          # Run the bounded xappdemo: push a mouse-move + title-bar button-down
-          # first, then run it; assert it registered an 800x600 framebuffer with
-          # a window region (non-background pixels in the window's title-bar row).
+          # Run xappdemo (render-once): default window at 220,150. Assert it
+          # registers an 800x600 framebuffer with the blue title bar drawn, and
+          # that a title-bar drag moves the window (the host loop's contract).
           node --experimental-vm-modules --no-warnings <<'EOF'
           globalThis.self ??= globalThis;
           const { createBlinkHost } = await import("./src/x86_64-blink.js");
           const fs = await import("node:fs");
           const host = await createBlinkHost({});
-          // move mouse over the title bar (window starts at 220,150, title h=28)
+          const elf = fs.readFileSync("containers/xappdemo.elf");
+          const px = (view, x, y) => { const o = y*view.stride + x*4; return [view.pixels[o],view.pixels[o+1],view.pixels[o+2]]; };
+
+          // frame 1: default position, no input -> window at 220,150.
+          let r = await host.runElf(elf, { argv: ["xappdemo"], progname: "/program" });
+          let info = host.fbInfo();
+          if (!info || info.width !== 800 || info.height !== 600) { console.error("gui: geometry", info); process.exit(1); }
+          let view = host.fbView();
+          const tb = px(view, 240, 158), bg = px(view, 5, 5);
+          const isBlue = tb[2] > 150 && tb[2] > tb[0] + 40;
+          if (!isBlue || (tb[0]===bg[0]&&tb[1]===bg[1]&&tb[2]===bg[2])) { console.error("gui: title bar not drawn", {tb,bg}); process.exit(1); }
+          const st1 = r.stdout.trim().split(/\s+/).map(Number); // x y dragging grabx graby
+          if (st1[0] !== 220 || st1[1] !== 150) { console.error("gui: frame1 state", r.stdout); process.exit(1); }
+
+          // frame 2: press inside the title bar (260,162) then drag to (400,300).
           host.pushInput({ type: "motion", x: 260, y: 162 });
           host.pushInput({ type: "button", button: 0, down: 1 });
-          const elf = fs.readFileSync("containers/xappdemo-smoke.elf");
-          const r = await host.runElf(elf, { argv: ["xappdemo"], progname: "/program" });
-          const info = host.fbInfo();
-          if (!info || info.width !== 800 || info.height !== 600) {
-            console.error("gui smoke: geometry wrong", info); process.exit(1);
-          }
-          const view = host.fbView();
-          if (!view) { console.error("gui smoke: no fbView"); process.exit(1); }
-          // Title bar is blue RGBA(40,90,200) at ~(220,150). Sample that pixel.
-          const px = (x, y) => {
-            const o = y * view.stride + x * 4;
-            return [view.pixels[o], view.pixels[o+1], view.pixels[o+2]];
-          };
-          const tb = px(240, 158); // inside title bar
-          const bg = px(5, 5);     // desktop background corner
-          const isBlue = tb[2] > 150 && tb[2] > tb[0] + 40;
-          const differs = tb[0] !== bg[0] || tb[1] !== bg[1] || tb[2] !== bg[2];
-          if (!isBlue || !differs) {
-            console.error("gui smoke: window title bar not rendered", { tb, bg });
-            process.exit(1);
-          }
-          console.log("gui smoke ok: 800x600 window rendered, title bar at (240,158)=", tb, "gen=", info.generation);
+          r = await host.runElf(elf, { argv: ["xappdemo", "220","150","0","0","0"], progname: "/program" });
+          const st2 = r.stdout.trim().split(/\s+/).map(Number);
+          if (st2[2] !== 1) { console.error("gui: drag did not start", r.stdout); process.exit(1); }
+          host.pushInput({ type: "motion", x: 400, y: 300 });
+          r = await host.runElf(elf, { argv: ["xappdemo", String(st2[0]),String(st2[1]),"1",String(st2[3]),String(st2[4])], progname: "/program" });
+          const st3 = r.stdout.trim().split(/\s+/).map(Number);
+          if (st3[0] === 220 && st3[1] === 150) { console.error("gui: window did not move", r.stdout); process.exit(1); }
+          info = host.fbInfo();
+          console.log("gui smoke ok: window drawn + dragged 220,150 ->", st3[0]+","+st3[1], "gen=", info.generation);
           EOF
 
       - name: Commit rebuilt artifacts
@@ -287,7 +287,7 @@ jobs:
         run: |
           git config user.email "github-actions@users.noreply.github.com"
           git config user.name "github-actions"
-          git add containers/blinkenlib.wasm containers/blinkenlib.js containers/fbtest.elf containers/fbtest.c containers/inputtest.elf containers/inputtest.c containers/xappdemo.elf containers/xappdemo-smoke.elf containers/xappdemo.c
+          git add containers/blinkenlib.wasm containers/blinkenlib.js containers/fbtest.elf containers/fbtest.c containers/inputtest.elf containers/inputtest.c containers/xappdemo.elf containers/xappdemo.c
           if git diff --cached --quiet; then
             echo "no changes"; exit 0
           fi
