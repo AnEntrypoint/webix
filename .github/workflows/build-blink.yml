@@ -345,10 +345,14 @@ jobs:
           // must exist or bind() fails ("Unable to open socket for unix"). Create
           // it up front. (The "local" transport is a no-op on Linux Xtrans.)
           try { FS.mkdir("/tmp/.X11-unix"); } catch(e) {}
-          console.log("X-smoke: Xvfb +stub libGL ("+stub.length+"B stub), exec ':99 -screen 0 640x480x16 -ac -noreset -nolock' ...");
+          // -noxkb: skip XKB keymap compilation. xkbcomp + xkeyboard-config
+          // aren't in the minimal rootfs, so the core keyboard can't init and
+          // the server aborts. The in-page desktop has no physical keyboard
+          // (input is synthesized via the 0x5fc ring), so -noxkb is correct.
+          console.log("X-smoke: Xvfb +stub libGL ("+stub.length+"B stub), exec ':99 -screen 0 640x480x16 -ac -noreset -nolock -noxkb' ...");
           let timedOut = false;
           const r = await Promise.race([
-            host.runElf(bytes, { progname: "/usr/bin/Xvfb", argv: ["Xvfb", ":99", "-screen", "0", "640x480x16", "-ac", "-noreset", "-nolock"] }),
+            host.runElf(bytes, { progname: "/usr/bin/Xvfb", argv: ["Xvfb", ":99", "-screen", "0", "640x480x16", "-ac", "-noreset", "-nolock", "-noxkb"] }),
             new Promise((res) => setTimeout(() => { timedOut = true; res({ exitCode: "TIMEOUT(serving)", stdout: "", stderr: "" }); }, 30000)),
           ]);
           console.log("X-smoke EXIT:", r.exitCode);
