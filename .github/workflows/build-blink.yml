@@ -298,11 +298,14 @@ jobs:
           # rootfs via createApk, then exec it under the freshly built wasm. The
           # 4GB MAXIMUM_MEMORY + mprotect=0 shim are meant to clear the two walls
           # that previously killed it (Cannot enlarge memory / __syscall_mprotect).
-          # Diagnostic (continue-on-error): logs how far the real X server gets.
-          # BLINK_STRACE makes blink log guest syscalls to stderr so we can see
-          # which one Xvfb loops on while it grows the heap to 4GB. The CI log
-          # tail shows the repeating call. (Diagnostic.)
-          export BLINK_STRACE=1
+          # ROOT CAUSE (proven): Alpine's mesa drags in libLLVM-19.so (153MB);
+          # blink maps+relocates it at load time and the host heap blows past 4GB.
+          # FIX: build a tiny stub libGL.so.1 (310 no-op gl*/glX* symbols Xvfb
+          # imports) so Xvfb relocates + runs its 2D/fbdev path WITHOUT mesa+LLVM.
+          # The stub is freestanding (-nostdlib) so it loads cleanly under musl.
+          gcc -shared -nostdlib -fPIC -O2 -Wl,-soname,libGL.so.1 \
+              -o containers/libGL-stub.so containers/libGL-stub.c
+          ls -la containers/libGL-stub.so
           node --experimental-vm-modules --no-warnings <<'EOF'
           globalThis.self ??= globalThis;
           const fs = await import("node:fs");
@@ -315,21 +318,30 @@ jobs:
           await apk.addByName("xvfb");
           const FS = host.Module.FS;
           if (!FS.analyzePath("/usr/bin/Xvfb").exists) { console.error("Xvfb not installed"); process.exit(1); }
+          // Swap the mesa-backed libGL (and its giant LLVM deps) for the stub so
+          // Xvfb never maps the 153MB LLVM. Overwrite libGL.so.1; drop LLVM/gallium.
+          const stub = fs.readFileSync("containers/libGL-stub.so");
+          for (const p of ["/usr/lib/libGL.so.1","/usr/lib/libGL.so.1.2.0"]) {
+            try { FS.writeFile(p, stub); } catch(e) {}
+          }
+          for (const f of ["libLLVM-19.so","libLLVM.so.19.1","libgallium-24.2.8.so","libGLX_mesa.so.0"]) {
+            try { FS.unlink("/usr/lib/"+f); } catch(e) {}
+          }
           const bytes = FS.readFile("/usr/bin/Xvfb");
-          console.log("X-smoke: /usr/bin/Xvfb present,", bytes.length, "bytes; exec -version under blink ...");
+          console.log("X-smoke: Xvfb +stub libGL ("+stub.length+"B stub), exec -version ...");
           const r = await Promise.race([
             host.runElf(bytes, { progname: "/usr/bin/Xvfb", argv: ["Xvfb", "-version"] }),
             new Promise((_, rej) => setTimeout(() => rej(new Error("timeout 40s")), 40000)),
           ]);
           console.log("X-smoke EXIT:", r.exitCode);
-          console.log("X-smoke stdout:", JSON.stringify((r.stdout||"").slice(0,400)));
-          console.log("X-smoke stderr:", JSON.stringify((r.stderr||"").slice(0,400)));
+          console.log("X-smoke stdout:", JSON.stringify((r.stdout||"").slice(0,500)));
+          console.log("X-smoke stderr:", JSON.stringify((r.stderr||"").slice(0,500)));
           const out = (r.stdout||"") + (r.stderr||"");
-          if (/Cannot enlarge memory/.test(out)) { console.error("STILL HITTING 2GB WALL"); process.exit(2); }
-          if (/X.Org|XFree86|version|Xvfb/i.test(out) || r.exitCode === 0) {
-            console.log("X-smoke RESULT: Xvfb cleared the mprotect/2GB walls and ran under blink");
+          if (/Cannot enlarge memory/.test(out)) { console.error("X-smoke: STILL OOM (stub did not avoid LLVM)"); process.exit(2); }
+          if (/X.Org X Server|Build Date|release|version/i.test(out)) {
+            console.log("X-smoke RESULT: SUCCESS — real Xvfb X server ran under blink with the stub libGL");
           } else {
-            console.log("X-smoke RESULT: past mprotect/2GB but exited", r.exitCode, "(possible further missing syscall)");
+            console.log("X-smoke RESULT: past the LLVM OOM, exit="+r.exitCode+" (remaining missing symbol/syscall)");
           }
           EOF
 
