@@ -77,13 +77,22 @@ static int itoa_buf(char *buf, int v) {
   return p;
 }
 
-void _start(void) {
-  /* argv lives on the stack: [argc][argv0][argv1..]. blinkenlib passes a
-   * NUL-separated argv buffer; read it via the standard SysV stack layout. */
-  long *sp;
-  __asm__ volatile("mov %%rsp, %0" : "=r"(sp));
-  long argc = sp[0];
-  char **argv = (char **)(sp + 1);
+/* Freestanding entry: a naked _start captures the SysV stack pointer (which
+ * points exactly at [argc] at process entry, before any prologue mangles rsp)
+ * and tail-calls main(argc, argv). Doing the rsp read inside a normal C
+ * function is unreliable because the compiler emits a prologue first. */
+__attribute__((naked, used)) void _start(void) {
+  __asm__ volatile(
+      "mov (%rsp), %rdi\n"      /* argc */
+      "lea 8(%rsp), %rsi\n"     /* &argv[0] */
+      "and $-16, %rsp\n"        /* 16-byte align for the call */
+      "call xappdemo_main\n"
+      "mov $60, %rax\n"          /* SYS_exit if main returns */
+      "xor %rdi, %rdi\n"
+      "syscall\n");
+}
+
+void xappdemo_main(long argc, char **argv) {
   /* argv: progname x y dragging grabx graby  (defaults if absent) */
   int wx = argc > 1 ? atoi_arg(argv[1]) : 220;
   int wy = argc > 2 ? atoi_arg(argv[2]) : 150;
@@ -93,8 +102,11 @@ void _start(void) {
   const int ww = 360, wh = 240;
 
   long len = (long)STRIDE * H;
-  fb = (uint8_t *)sc6(SYS_mmap, 0, len, 3, 0x22, -1, 0);
-  if ((long)fb < 0) sc6(SYS_exit, 1, 0, 0, 0, 0, 0);
+  long mret = sc6(SYS_mmap, 0, len, 3, 0x22, -1, 0);
+  /* mmap returns the mapping addr on success, or -errno (small negative) on
+   * failure. Treat the top of the address space (>= -4095) as an error. */
+  if (mret >= -4095L && mret < 0) sc6(SYS_exit, 2, 0, 0, 0, 0, 0);
+  fb = (uint8_t *)mret;
 
   /* ---- drain input: latest motion + button transitions ---- */
   uint8_t evbuf[MAXEV * EVSZ];
@@ -138,13 +150,19 @@ void _start(void) {
   /* publish frame */
   sc6(SYS_fb_register, (long)fb, W, H, STRIDE, 0, 0);
 
-  /* emit new window state for the host: "x y dragging grabx graby\n" */
-  char out[64]; int p = 0;
+  /* emit new window state + a self-readback of the title-bar pixel (so the host
+   * can tell whether the guest's own paint landed): "x y drag gx gy | r g b\n" */
+  uint8_t *tbp = fb + (long)158 * STRIDE + (long)240 * 4;
+  char out[96]; int p = 0;
   p += itoa_buf(out + p, wx); out[p++] = ' ';
   p += itoa_buf(out + p, wy); out[p++] = ' ';
   p += itoa_buf(out + p, dragging); out[p++] = ' ';
   p += itoa_buf(out + p, grabx); out[p++] = ' ';
-  p += itoa_buf(out + p, graby); out[p++] = '\n';
+  p += itoa_buf(out + p, graby);
+  out[p++] = ' '; out[p++] = '|'; out[p++] = ' ';
+  p += itoa_buf(out + p, tbp[0]); out[p++] = ' ';
+  p += itoa_buf(out + p, tbp[1]); out[p++] = ' ';
+  p += itoa_buf(out + p, tbp[2]); out[p++] = '\n';
   sc6(SYS_write, 1, (long)out, p, 0, 0, 0);
 
   sc6(SYS_exit, 0, 0, 0, 0, 0, 0);
