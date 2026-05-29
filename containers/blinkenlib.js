@@ -8268,6 +8268,8 @@ var _strerror = createExportWrapper("strerror", 1);
 
 var _pthread_self = () => (_pthread_self = wasmExports["pthread_self"])();
 
+var _fflush = createExportWrapper("fflush", 1);
+
 var __emscripten_tls_init = createExportWrapper("_emscripten_tls_init", 0);
 
 var _emscripten_builtin_memalign = createExportWrapper("emscripten_builtin_memalign", 2);
@@ -8275,8 +8277,6 @@ var _emscripten_builtin_memalign = createExportWrapper("emscripten_builtin_memal
 var __emscripten_thread_init = createExportWrapper("_emscripten_thread_init", 6);
 
 var __emscripten_thread_crashed = createExportWrapper("_emscripten_thread_crashed", 0);
-
-var _fflush = createExportWrapper("fflush", 1);
 
 var _emscripten_main_thread_process_queued_calls = createExportWrapper("emscripten_main_thread_process_queued_calls", 0);
 
