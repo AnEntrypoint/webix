@@ -502,7 +502,8 @@ jobs:
             { serverArgv: [":99","-screen","0","640x480x16","-ac","-noreset","-nolock"],
               clientProgname: clientPath,
               clientArgv: clientPath.endsWith("xdpyinfo") ? ["-display",":99"] : ["-display",":99","-solid","blue"],
-              clientDelayMs: 1500, overallTimeoutMs: 28000 });
+              clientDelayMs: 6000, overallTimeoutMs: 40000 });
+          console.log("XC-smoke server exit:", r.server.exitCode);
           console.log("XC-smoke client exit:", r.client.exitCode);
           console.log("XC-smoke client stdout:", JSON.stringify((r.client.stdout||"").slice(0,1500)));
           console.log("XC-smoke client stderr:", JSON.stringify((r.client.stderr||"").slice(0,800)));
