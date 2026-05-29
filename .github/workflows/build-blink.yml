@@ -243,12 +243,12 @@ jobs:
           EOF
 
       - name: GUI app smoke (xappdemo -> framebuffer window)
-        continue-on-error: true
         run: |
-          # DIAGNOSTIC (non-fatal): run xappdemo (render-once) and DUMP the
-          # framebuffer + reported state so the geometry can be tuned from the
-          # build log. The proven hello/fb/input smokes above are the real gate;
-          # this step never fails the build while xappdemo's coords are iterated.
+          # Hard assertion (the page-walk fbView fix makes full-frame reads
+          # correct): run xappdemo, assert the window's blue title bar at
+          # (240,158) -- ~506KB into the framebuffer, well past page 0 -- reads
+          # blue, proving the in-guest GUI paints + the host reads it past the
+          # first page.
           node --experimental-vm-modules --no-warnings <<'EOF'
           globalThis.self ??= globalThis;
           const { createBlinkHost } = await import("./src/x86_64-blink.js");
@@ -257,19 +257,16 @@ jobs:
           const elf = fs.readFileSync("containers/xappdemo.elf");
           const px = (view, x, y) => { const o = y*view.stride + x*4; return [view.pixels[o],view.pixels[o+1],view.pixels[o+2]]; };
           const r = await host.runElf(elf, { argv: ["xappdemo"], progname: "/program" });
+          if (r.exitCode !== 0) { console.error("gui: exit", r.exitCode, r.stdout); process.exit(1); }
           const info = host.fbInfo();
-          console.log("gui diag: exit=", r.exitCode, "stdout=", JSON.stringify(r.stdout), "fb=", JSON.stringify(info));
+          if (!info || info.width !== 800 || info.height !== 600) { console.error("gui: geometry", info); process.exit(1); }
           const view = host.fbView();
-          if (view) {
-            // dump a coarse grid of pixels across the frame to locate the window
-            const rows = [];
-            for (let y = 140; y <= 200; y += 10) {
-              const row = [];
-              for (let x = 200; x <= 600; x += 40) row.push(px(view, x, y).join(","));
-              rows.push("y"+y+": "+row.join(" | "));
-            }
-            console.log("gui diag pixel grid:\n" + rows.join("\n"));
+          const tb = px(view, 240, 158), bg = px(view, 5, 5);
+          const isBlue = tb[2] > 150 && tb[2] > tb[0] + 40;
+          if (!isBlue || (tb[0]===bg[0]&&tb[1]===bg[1]&&tb[2]===bg[2])) {
+            console.error("gui: title bar not rendered/read", { tb, bg }); process.exit(1);
           }
+          console.log("gui smoke ok: window title bar (240,158)=", tb, "bg(5,5)=", bg, "gen=", info.generation);
           EOF
 
       - name: Commit rebuilt artifacts
