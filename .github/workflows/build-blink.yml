@@ -408,6 +408,8 @@ jobs:
           catch(e) { console.log("X-smoke clone-marker: (none — SysClone never dispatched)"); }
           try { console.log("X-smoke fork-marker:", FS.readFile("/tmp/blink-fork-fired", {encoding:"utf8"})); }
           catch(e) { console.log("X-smoke fork-marker: (none — SysFork never dispatched)"); }
+          try { console.log("X-smoke em.log:\n" + FS.readFile("/em.log", {encoding:"utf8"})); }
+          catch(e) { console.log("X-smoke em.log: (none — EmRunChildInline never entered)"); }
           try { console.log("X-smoke xkm-files:", JSON.stringify((FS.readdir("/tmp")||[]).filter(f=>/xkm|server-/.test(f)))); } catch(e) {}
           const out = (r.stdout||"") + (r.stderr||"");
           if (/Cannot enlarge memory/.test(out)) { console.error("X-smoke: STILL OOM (stub did not avoid LLVM)"); process.exit(2); }
