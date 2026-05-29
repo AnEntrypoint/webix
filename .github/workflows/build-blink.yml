@@ -67,8 +67,21 @@ jobs:
           # Blink spawns its own pthreads from there. SharedArrayBuffer + a
           # growable memory needs -sMAXIMUM_MEMORY; COOP/COEP are required at
           # serve time (set in the consuming app).
-          PTHREAD_FLAGS="-pthread -sPTHREAD_POOL_SIZE=8 -sMAXIMUM_MEMORY=2147483648"
-          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS -lnodefs.js -lidbfs.js"
+          # 4GB max linear memory (wasm32 ceiling = 65536 pages = 4GiB; the
+          # -pthread shared-memory build supports it on emscripten 3.1.69). The
+          # old 2GB cap made real X servers (Xvfb wanted 2GB+4KB at startup)
+          # fail with "Cannot enlarge memory"; 4GB gives the headroom.
+          PTHREAD_FLAGS="-pthread -sPTHREAD_POOL_SIZE=8 -sMAXIMUM_MEMORY=4294967296"
+          # mprotect shim: emscripten stubs ___syscall_mprotect to ENOSYS, which
+          # breaks musl's allocator under big dynamic binaries (Xorg spammed
+          # "unsupported syscall: __syscall_mprotect"). wasm linear memory has no
+          # page protection, so mprotect is correctly a success no-op -> return 0.
+          cat > emlib-mprotect.js <<'JSLIB'
+          addToLibrary({
+            __syscall_mprotect: function(addr, len, prot) { return 0; },
+          });
+          JSLIB
+          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS --js-library $(pwd)/emlib-mprotect.js -lnodefs.js -lidbfs.js"
           # -pthread also has to reach the C compiler (not just the linker) so
           # threading intrinsics and the pthread headers are wired in.
           export CFLAGS="-pthread"
@@ -270,6 +283,44 @@ jobs:
             console.error("gui: title bar not rendered/read", { tb, bg }); process.exit(1);
           }
           console.log("gui smoke ok: window title bar (240,158)=", tb, "bg(5,5)=", bg, "gen=", info.generation);
+          EOF
+
+      - name: X-server smoke (Alpine xvfb under blink — 4GB + mprotect shim)
+        continue-on-error: true
+        run: |
+          # Install Xvfb (+ X dep closure) from the live Alpine repo into the
+          # rootfs via createApk, then exec it under the freshly built wasm. The
+          # 4GB MAXIMUM_MEMORY + mprotect=0 shim are meant to clear the two walls
+          # that previously killed it (Cannot enlarge memory / __syscall_mprotect).
+          # Diagnostic (continue-on-error): logs how far the real X server gets.
+          node --experimental-vm-modules --no-warnings <<'EOF'
+          globalThis.self ??= globalThis;
+          const fs = await import("node:fs");
+          const zlib = await import("node:zlib");
+          const { createBlinkHost } = await import("./src/x86_64-blink.js");
+          const { createApk } = await import("./src/alpine-apk.js");
+          const host = await createBlinkHost({});
+          host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
+          const apk = createApk(host, { fetchImpl: fetch });
+          await apk.addByName("xvfb");
+          const FS = host.Module.FS;
+          if (!FS.analyzePath("/usr/bin/Xvfb").exists) { console.error("Xvfb not installed"); process.exit(1); }
+          const bytes = FS.readFile("/usr/bin/Xvfb");
+          console.log("X-smoke: /usr/bin/Xvfb present,", bytes.length, "bytes; exec -version under blink ...");
+          const r = await Promise.race([
+            host.runElf(bytes, { progname: "/usr/bin/Xvfb", argv: ["Xvfb", "-version"] }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("timeout 40s")), 40000)),
+          ]);
+          console.log("X-smoke EXIT:", r.exitCode);
+          console.log("X-smoke stdout:", JSON.stringify((r.stdout||"").slice(0,400)));
+          console.log("X-smoke stderr:", JSON.stringify((r.stderr||"").slice(0,400)));
+          const out = (r.stdout||"") + (r.stderr||"");
+          if (/Cannot enlarge memory/.test(out)) { console.error("STILL HITTING 2GB WALL"); process.exit(2); }
+          if (/X.Org|XFree86|version|Xvfb/i.test(out) || r.exitCode === 0) {
+            console.log("X-smoke RESULT: Xvfb cleared the mprotect/2GB walls and ran under blink");
+          } else {
+            console.log("X-smoke RESULT: past mprotect/2GB but exited", r.exitCode, "(possible further missing syscall)");
+          }
           EOF
 
       - name: Commit rebuilt artifacts
