@@ -52,7 +52,7 @@ jobs:
         run: |
           ENV_VAL="web,worker,node"
           if [ "$WITH_NODE_ENV" = "false" ]; then ENV_VAL="web,worker"; fi
-          EXPORTS='"UTF8ToString","stringToNewUTF8","AsciiToString","FS","callMain","addFunction","wasmExports"'
+          EXPORTS='"UTF8ToString","stringToNewUTF8","AsciiToString","FS","ENV","callMain","addFunction","wasmExports"'
           # Explicitly export the framebuffer getters added in the portabox
           # branch so the JS host can map the guest framebuffer zero-copy.
           # (They are EMSCRIPTEN_KEEPALIVE too, but listing them here is robust
