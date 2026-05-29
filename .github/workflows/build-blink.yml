@@ -124,6 +124,7 @@ jobs:
           # --enable-* flags comment them at configure time, but be defensive.
           sed -i 's@^#define DISABLE_SOCKETS@// #define DISABLE_SOCKETS@' "$CFG"
           sed -i 's@^#define DISABLE_NONPOSIX@// #define DISABLE_NONPOSIX@' "$CFG"
+          sed -i 's@^#define DISABLE_ANCILLARY@// #define DISABLE_ANCILLARY@' "$CFG"
           # Uncomment the HAVE_* that emscripten's musl libc genuinely provides.
           # (HAVE_FORK is deliberately LEFT OFF: enabling it regressed Xvfb to a
           # silent early exit 127 — Xorg changes startup behavior when it thinks
@@ -579,6 +580,7 @@ jobs:
           CFG=config.h
           sed -i 's@^#define DISABLE_SOCKETS@// #define DISABLE_SOCKETS@' "$CFG"
           sed -i 's@^#define DISABLE_NONPOSIX@// #define DISABLE_NONPOSIX@' "$CFG"
+          sed -i 's@^#define DISABLE_ANCILLARY@// #define DISABLE_ANCILLARY@' "$CFG"
           for SYM in HAVE_PIPE2 HAVE_DUP3 HAVE_MAP_SHARED HAVE_MAP_ANONYMOUS HAVE_SCHED_YIELD \
                      HAVE_SCHED_H HAVE_GETENTROPY HAVE_CLOCK_SETTIME HAVE_STRCHRNUL HAVE_MEMCCPY \
                      HAVE_REALPATH HAVE_SEEKDIR HAVE_PREADV HAVE_VASPRINTF HAVE_WCWIDTH \
