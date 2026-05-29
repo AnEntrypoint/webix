@@ -1,5 +1,10 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>fb-witness</title></head>
+<html><head><meta charset="utf-8"><title>fb-witness</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;font-family:Monaco,Menlo,monospace}
+  #screen{position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain;image-rendering:pixelated;background:#000}
+  #out{position:fixed;left:8px;bottom:8px;margin:0;color:#0f0;font-size:11px;opacity:.7;max-width:96vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style></head>
 <body>
 <canvas id="screen"></canvas>
 <pre id="out">running…</pre>
