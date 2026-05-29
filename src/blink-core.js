@@ -89,7 +89,9 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   let lastLoaded=null;
   const preloaded=new Map();
   const stdinQueue=options.stdinBytes?[...options.stdinBytes].reverse():[];
+  let exited=false;
   function settleExit(code){
+    exited=true;
     lastExitCode=code;
     if(exitDeferred){ const d=exitDeferred; exitDeferred=null; d.resolve(code) }
   }
@@ -120,9 +122,18 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   }
   // memBuffer throws a clear error if no handle resolved; probe it once now.
   memBuffer(Module);
+  // Trampoline the cooperative-preemption resume off the signal callback's
+  // stack. The guest raises SIGTRAP/PREEMPT every MAX_CYCLES; calling
+  // _blinkenlib_preempt_resume() synchronously from inside signalCb re-enters
+  // the guest WITHOUT unwinding, so each slice nests another invoke_viii frame
+  // and a forever-running guest (e.g. the X server) overflows the JS call stack
+  // after ~thousands of slices. Instead, return from signalCb (leaving the guest
+  // paused) and schedule the resume on a fresh stack via setTimeout(0), which
+  // also lets the JS event loop (rAF/blits/input) breathe between slices.
+  const resumeSoon=()=>{ if(exited) return; setTimeout(()=>{ if(!exited){ try{ Module._blinkenlib_preempt_resume() }catch(e){ settleExit(255) } } },0); };
   const signalCb=Module.addFunction((sig,code)=>{
     if(sig!==SIGTRAP){ lastSignal={sig,code}; settleExit(128+sig); return }
-    if(code===BLINK_PREEMPT) Module._blinkenlib_preempt_resume();
+    if(code===BLINK_PREEMPT) resumeSoon();
     else if(code===BLINK_FAKE_TTY){ if(options.onTtyPause) options.onTtyPause(); else Module._blinkenlib_faketty_resume() }
   },"vii");
   const exitCb=Module.addFunction((code)=>{ settleExit(code) },"vi");
