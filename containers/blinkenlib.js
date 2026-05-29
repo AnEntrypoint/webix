@@ -8203,6 +8203,7 @@ function assignWasmImports() {
     /** @export */ invoke_ii,
     /** @export */ invoke_iii,
     /** @export */ invoke_iiii,
+    /** @export */ invoke_iiiii,
     /** @export */ invoke_ji,
     /** @export */ invoke_vi,
     /** @export */ invoke_vii,
@@ -8372,10 +8373,21 @@ function invoke_vi(index, a1) {
   }
 }
 
-function invoke_i(index) {
+function invoke_iiiii(index, a1, a2, a3, a4) {
   var sp = stackSave();
   try {
-    return getWasmTableEntry(index)();
+    return getWasmTableEntry(index)(a1, a2, a3, a4);
+  } catch (e) {
+    stackRestore(sp);
+    if (e !== e + 0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iii(index, a1, a2) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1, a2);
   } catch (e) {
     stackRestore(sp);
     if (e !== e + 0) throw e;
@@ -8394,10 +8406,10 @@ function invoke_ii(index, a1) {
   }
 }
 
-function invoke_iii(index, a1, a2) {
+function invoke_i(index) {
   var sp = stackSave();
   try {
-    return getWasmTableEntry(index)(a1, a2);
+    return getWasmTableEntry(index)();
   } catch (e) {
     stackRestore(sp);
     if (e !== e + 0) throw e;
