@@ -298,6 +298,7 @@ jobs:
         continue-on-error: true
         env:
           BLINK_FORK_DEBUG: "1"
+          BLINK_STRACE: "1"
         run: |
           # Install Xvfb (+ X dep closure) from the live Alpine repo into the
           # rootfs via createApk, then exec it under the freshly built wasm. The
