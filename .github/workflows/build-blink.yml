@@ -18,6 +18,9 @@ on:
   push:
     paths:
       - ".github/workflows/build-blink.yml"
+      # Rebuild the guest ELFs whenever their sources change, otherwise an edit
+      # to a container app (e.g. xappdemo.c) silently never ships a new binary.
+      - "containers/*.c"
 
 permissions:
   contents: write
