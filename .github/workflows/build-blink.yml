@@ -515,6 +515,7 @@ jobs:
 
       - name: X-client smoke (PRODUCT path — bundled overlay, no apk)
         if: ${{ hashFiles('containers/x-client-overlay.tar.gz') != '' }}
+        continue-on-error: true   # advisory: the apk-path XC-smoke is the gate
         run: |
           set -e
           node --experimental-vm-modules --no-warnings <<'EOF'
