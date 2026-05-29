@@ -352,8 +352,8 @@ jobs:
             new Promise((res) => setTimeout(() => { timedOut = true; res({ exitCode: "TIMEOUT(serving)", stdout: "", stderr: "" }); }, 30000)),
           ]);
           console.log("X-smoke EXIT:", r.exitCode);
-          console.log("X-smoke stdout:", JSON.stringify((r.stdout||"").slice(0,500)));
-          console.log("X-smoke stderr:", JSON.stringify((r.stderr||"").slice(0,500)));
+          console.log("X-smoke stdout:", JSON.stringify((r.stdout||"").slice(0,2000)));
+          console.log("X-smoke stderr:", JSON.stringify((r.stderr||"").slice(-3000)));
           const out = (r.stdout||"") + (r.stderr||"");
           if (/Cannot enlarge memory/.test(out)) { console.error("X-smoke: STILL OOM (stub did not avoid LLVM)"); process.exit(2); }
           // A still-failing listener is NOT success — match the explicit fatal.
