@@ -81,7 +81,7 @@ var readyPromise = new Promise((resolve, reject) => {
   readyPromiseReject = reject;
 });
 
-[ "_blinkenlib_get_fb_vaddr", "_blinkenlib_get_fb_width", "_blinkenlib_get_fb_height", "_blinkenlib_get_fb_stride", "_blinkenlib_get_fb_generation", "_blinkenlib_get_fb_ptr", "_blinkenlib_spy_address", "_blinkenlib_push_input", "_blinkenlib_input_pending", "_blinkenlib_vm_current", "_blinkenlib_vm_set", "_blinkenlib_vm_spawn", "_blinkenlib_continue", "___indirect_function_table", "_blinkenlib_run_fast", "_blinkenlib_run", "_blinkenlib_starti", "_blinkenlib_start", "_blinkenlib_stepi", "_blinkenlib_preempt_resume", "_blinkenlib_faketty_resume", "_blinkenlib_get_clstruct", "_blinkenlib_get_argc_string", "_blinkenlib_get_argv_string", "_blinkenlib_get_progname_string", "_main", "onRuntimeInitialized" ].forEach(prop => {
+[ "_blinkenlib_get_fb_vaddr", "_blinkenlib_get_fb_width", "_blinkenlib_get_fb_height", "_blinkenlib_get_fb_stride", "_blinkenlib_get_fb_generation", "_blinkenlib_get_fb_ptr", "_blinkenlib_spy_address", "_blinkenlib_push_input", "_blinkenlib_input_pending", "_blinkenlib_vm_current", "_blinkenlib_vm_set", "_blinkenlib_vm_spawn", "_blinkenlib_continue", "_blinkenlib_run_thread", "_blinkenlib_thread_done", "_blinkenlib_thread_status", "___indirect_function_table", "_blinkenlib_run_fast", "_blinkenlib_run", "_blinkenlib_starti", "_blinkenlib_start", "_blinkenlib_stepi", "_blinkenlib_preempt_resume", "_blinkenlib_faketty_resume", "_blinkenlib_get_clstruct", "_blinkenlib_get_argc_string", "_blinkenlib_get_argv_string", "_blinkenlib_get_progname_string", "_main", "onRuntimeInitialized" ].forEach(prop => {
   if (!Object.getOwnPropertyDescriptor(readyPromise, prop)) {
     Object.defineProperty(readyPromise, prop, {
       get: () => abort("You are getting " + prop + " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"),
@@ -8226,6 +8226,14 @@ var _blinkenlib_vm_set = Module["_blinkenlib_vm_set"] = createExportWrapper("bli
 
 var _blinkenlib_vm_spawn = Module["_blinkenlib_vm_spawn"] = createExportWrapper("blinkenlib_vm_spawn", 1);
 
+var _blinkenlib_run_thread = Module["_blinkenlib_run_thread"] = createExportWrapper("blinkenlib_run_thread", 1);
+
+var _pthread_self = () => (_pthread_self = wasmExports["pthread_self"])();
+
+var _blinkenlib_thread_done = Module["_blinkenlib_thread_done"] = createExportWrapper("blinkenlib_thread_done", 0);
+
+var _blinkenlib_thread_status = Module["_blinkenlib_thread_status"] = createExportWrapper("blinkenlib_thread_status", 0);
+
 var _blinkenlib_run_fast = Module["_blinkenlib_run_fast"] = createExportWrapper("blinkenlib_run_fast", 0);
 
 var _blinkenlib_run = Module["_blinkenlib_run"] = createExportWrapper("blinkenlib_run", 0);
@@ -8271,8 +8279,6 @@ var _blinkenlib_input_pending = Module["_blinkenlib_input_pending"] = createExpo
 var _main = Module["_main"] = createExportWrapper("__main_argc_argv", 2);
 
 var _strerror = createExportWrapper("strerror", 1);
-
-var _pthread_self = () => (_pthread_self = wasmExports["pthread_self"])();
 
 var _fflush = createExportWrapper("fflush", 1);
 
@@ -8360,6 +8366,17 @@ function invoke_vi(index, a1) {
   }
 }
 
+function invoke_i(index) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)();
+  } catch (e) {
+    stackRestore(sp);
+    if (e !== e + 0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_ii(index, a1) {
   var sp = stackSave();
   try {
@@ -8397,17 +8414,6 @@ function invoke_vii(index, a1, a2) {
   var sp = stackSave();
   try {
     getWasmTableEntry(index)(a1, a2);
-  } catch (e) {
-    stackRestore(sp);
-    if (e !== e + 0) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_i(index) {
-  var sp = stackSave();
-  try {
-    return getWasmTableEntry(index)();
   } catch (e) {
     stackRestore(sp);
     if (e !== e + 0) throw e;
@@ -8455,12 +8461,12 @@ function applySignatureConversions(wasmExports) {
   // First, make a copy of the incoming exports object
   wasmExports = Object.assign({}, wasmExports);
   var makeWrapper_pp = f => a0 => f(a0) >>> 0;
-  var makeWrapper_p_ = f => a0 => f(a0) >>> 0;
   var makeWrapper_p = f => () => f() >>> 0;
+  var makeWrapper_p_ = f => a0 => f(a0) >>> 0;
   var makeWrapper_ppp = f => (a0, a1) => f(a0, a1) >>> 0;
   wasmExports["malloc"] = makeWrapper_pp(wasmExports["malloc"]);
-  wasmExports["strerror"] = makeWrapper_p_(wasmExports["strerror"]);
   wasmExports["pthread_self"] = makeWrapper_p(wasmExports["pthread_self"]);
+  wasmExports["strerror"] = makeWrapper_p_(wasmExports["strerror"]);
   wasmExports["emscripten_builtin_memalign"] = makeWrapper_ppp(wasmExports["emscripten_builtin_memalign"]);
   wasmExports["emscripten_main_runtime_thread_id"] = makeWrapper_p(wasmExports["emscripten_main_runtime_thread_id"]);
   wasmExports["emscripten_stack_get_base"] = makeWrapper_p(wasmExports["emscripten_stack_get_base"]);
