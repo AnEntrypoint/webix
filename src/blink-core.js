@@ -339,32 +339,28 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
         writeStr(argvPtr,"",4096);
         return Module._blinkenlib_vm_spawn(0);   // fresh (m,s) at progname, current
       };
-      // SERVER on its own worker thread (forever-serving, blocking poll/accept).
+      // BOTH guests on their OWN worker pthreads (slot 0 = server, slot 1 =
+      // client) — this avoids the main-thread _blinkenlib_run path whose
+      // setupProgram/TearDown+InitBus re-init aborts while the server thread is
+      // live. Each thread uses normal blocking syscalls; the X handshake
+      // completes via real preemptive scheduling. Witness the client by its
+      // thread EXIT STATUS (xdpyinfo exit 0 = connected+queried the display),
+      // independent of the shared stdout buffer.
       const serverH=spawn("/xserver",["Xvfb",...serverArgv]);
-      Module._blinkenlib_run_thread(serverH);
-      // Give the server real time to reach its listening dispatch loop.
-      await sleep(clientDelayMs);
-      // CLIENT on the MAIN thread via the proven run path (working out/err IO +
-      // exit tracking). Its blocking reads block the main thread, but the SERVER
-      // worker keeps running + services the socket, so the X handshake completes.
-      const serverOut=()=>decode(outBytes), serverErr=()=>decode(errBytes);
-      const cargv=[clientProgname.split("/").pop(),...clientArgv];
-      writeStr(prognamePtr,"/xclient",1024);
-      writeArgv(argcPtr, cargv, 4096);
-      writeStr(argvPtr,"",4096);
-      // Reset capture, then run the client to completion on this thread.
-      const beforeLen=outBytes.length, beforeErrLen=errBytes.length;
-      const done=new Promise((resolve)=>{ exitDeferred={resolve}; });
-      let clientCode;
-      try {
-        Module._blinkenlib_run();   // main-thread run; setupProgram loads /xclient
-        clientCode=await Promise.race([ done, sleep(overallTimeoutMs).then(()=>"TIMEOUT") ]);
-      } catch(e) { clientCode=255; }
-      exitDeferred=null;
-      const out=decode(outBytes.slice(beforeLen)), err=decode(errBytes.slice(beforeErrLen));
-      return { timedOut:clientCode==="TIMEOUT",
+      Module._blinkenlib_run_thread_slot(serverH, 0);
+      await sleep(clientDelayMs);   // let the server reach its dispatch loop
+      const clientH=spawn("/xclient",[clientProgname.split("/").pop(),...clientArgv]);
+      Module._blinkenlib_run_thread_slot(clientH, 1);
+      const t0=Date.now(); let timedOut=false;
+      while(!Module._blinkenlib_thread_done_slot(1)){
+        if(Date.now()-t0>overallTimeoutMs){ timedOut=true; break; }
+        await sleep(100);
+      }
+      const clientCode=Module._blinkenlib_thread_done_slot(1)?Module._blinkenlib_thread_status_slot(1):"RUNNING";
+      const out=decode(outBytes), err=decode(errBytes);
+      return { timedOut,
                client:{ exitCode:clientCode, stdout:out, stderr:err },
-               server:{ exitCode:"RUNNING", stdout:serverOut(), stderr:serverErr() } };
+               server:{ exitCode:"RUNNING", stdout:out, stderr:err } };
     },
     pushStdin(bytes){ for(const b of [...bytes].reverse()) stdinQueue.unshift(b) },
     async runShellScript(busyboxBytes, scriptText, { argv=[], progname="/program" }={}){
