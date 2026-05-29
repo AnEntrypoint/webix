@@ -8275,9 +8275,9 @@ var __emscripten_thread_crashed = createExportWrapper("_emscripten_thread_crashe
 
 var _fflush = createExportWrapper("fflush", 1);
 
-var _htons = createExportWrapper("htons", 1);
-
 var _emscripten_main_thread_process_queued_calls = createExportWrapper("emscripten_main_thread_process_queued_calls", 0);
+
+var _htons = createExportWrapper("htons", 1);
 
 var _emscripten_main_runtime_thread_id = createExportWrapper("emscripten_main_runtime_thread_id", 0);
 
