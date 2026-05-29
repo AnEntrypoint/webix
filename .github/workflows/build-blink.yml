@@ -341,6 +341,10 @@ jobs:
           // server even though init otherwise reached it. -nolock removes that
           // dependency (single-tenant in-page server; no competing X server).
           try { for (const f of (FS.readdir("/tmp")||[])) { if (f === "." || f === "..") continue; try { FS.unlink("/tmp/"+f); } catch(e) {} } } catch(e) {}
+          // Xorg's "unix" transport binds AF_UNIX to /tmp/.X11-unix/Xnn; the dir
+          // must exist or bind() fails ("Unable to open socket for unix"). Create
+          // it up front. (The "local" transport is a no-op on Linux Xtrans.)
+          try { FS.mkdir("/tmp/.X11-unix"); } catch(e) {}
           console.log("X-smoke: Xvfb +stub libGL ("+stub.length+"B stub), exec ':99 -screen 0 640x480x16 -ac -noreset -nolock' ...");
           let timedOut = false;
           const r = await Promise.race([
@@ -352,10 +356,17 @@ jobs:
           console.log("X-smoke stderr:", JSON.stringify((r.stderr||"").slice(0,500)));
           const out = (r.stdout||"") + (r.stderr||"");
           if (/Cannot enlarge memory/.test(out)) { console.error("X-smoke: STILL OOM (stub did not avoid LLVM)"); process.exit(2); }
-          if (timedOut || /Initializing built-in extension|MIT-SHM|screen|listening|XINERAMA|RANDR/i.test(out)) {
-            console.log("X-smoke RESULT: SUCCESS — real Xvfb X server is running under blink (stub libGL, no LLVM)");
+          // A still-failing listener is NOT success — match the explicit fatal.
+          const sockFail = /Cannot establish any listening sockets|failed to open listener|Unable to open socket/i.test(out);
+          // Genuine post-transport witness: the server logged extension/screen
+          // init or kept running (timeout = it's in the dispatch loop serving).
+          const serving = timedOut || /Initializing built-in extension|MIT-SHM|RANDR|XINERAMA|reset generation|Screen \d+ added/i.test(out);
+          if (serving && !sockFail) {
+            console.log("X-smoke RESULT: SUCCESS — real Xvfb X server reached the dispatch loop under blink (stub libGL, epoll shim, -nolock)");
+          } else if (sockFail) {
+            console.log("X-smoke RESULT: PROGRESS — Xvfb ran past LLVM/epoll/lock into transport setup; listener open still fails. exit="+r.exitCode);
           } else {
-            console.log("X-smoke RESULT: Xvfb main ran (no LLVM OOM), exit="+r.exitCode+" out indicates: "+out.slice(0,120));
+            console.log("X-smoke RESULT: Xvfb main ran (no LLVM OOM), exit="+r.exitCode+" out indicates: "+out.slice(0,160));
           }
           EOF
 
