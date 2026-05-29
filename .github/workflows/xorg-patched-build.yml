@@ -131,10 +131,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eux
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global --add safe.directory '*'
-          git config user.email "ci@webix"
-          git config user.name "webix-ci"
+          cd "$GITHUB_WORKSPACE"
+          pwd; ls -la .git 2>&1 | head -1 || true
+          git config --global user.email "ci@webix"
+          git config --global user.name "webix-ci"
           git add containers/Xvfb-patched containers/server.xkm
           git commit -m "xorg: GL-less Xvfb-patched (no-fork keymap) + precompiled server.xkm" || echo "no changes"
           R="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
