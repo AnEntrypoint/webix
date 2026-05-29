@@ -79,7 +79,12 @@ jobs:
           # (__syscall_mprotect ENOSYS warnings from emscripten are non-fatal —
           # NOJIT means no exec-page protection is needed; Xvfb runs past them.)
           PTHREAD_FLAGS="-pthread -sPTHREAD_POOL_SIZE=8 -sMAXIMUM_MEMORY=4294967296"
-          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS -lnodefs.js -lidbfs.js"
+          # -sABORTING_MALLOC=0: when the heap cannot grow, emscripten malloc
+          # returns NULL instead of aborting the whole runtime ("Cannot enlarge
+          # memory", exit 250). A big guest mmap/malloc (Xorg/Xvfb) then gets a
+          # recoverable failure that blink/musl degrade from, instead of killing
+          # the VM. Pairs with the blink-side Mmap headroom guard (map.c).
+          EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sABORTING_MALLOC=0 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS -lnodefs.js -lidbfs.js"
           # -pthread also has to reach the C compiler (not just the linker) so
           # threading intrinsics and the pthread headers are wired in.
           export CFLAGS="-pthread"
