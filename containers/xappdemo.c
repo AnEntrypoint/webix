@@ -124,6 +124,7 @@ void xappdemo_main(long argc, char **argv) {
   }
 
   /* ---- update window drag state ---- */
+  int wx0 = wx, wy0 = wy, drag0 = dragging;
   if (mdown == 1 && !dragging && mx >= 0) {
     if (mx >= wx && mx < wx + ww && my >= wy && my < wy + TITLE_H) {
       dragging = 1; grabx = mx - wx; graby = my - wy;
@@ -132,6 +133,13 @@ void xappdemo_main(long argc, char **argv) {
     dragging = 0;
   }
   if (dragging && mx >= 0) { wx = mx - grabx; wy = my - graby; }
+
+  /* Damage: whether anything that affects the visible frame changed this run.
+   * The window moved, the drag state flipped, or the cursor moved (mx>=0 means
+   * a fresh pointer sample this frame). Under the render-once model the host
+   * still reads the fb each run, but a damage=0 frame lets it skip the 1.9MB
+   * pixel copy + canvas upload since the displayed frame is already current. */
+  int damage = (wx != wx0) || (wy != wy0) || (dragging != drag0) || (mx >= 0) ? 1 : 0;
 
   /* ---- paint ---- */
   for (int y = 0; y < H; y++) {
@@ -162,7 +170,10 @@ void xappdemo_main(long argc, char **argv) {
   out[p++] = ' '; out[p++] = '|'; out[p++] = ' ';
   p += itoa_buf(out + p, tbp[0]); out[p++] = ' ';
   p += itoa_buf(out + p, tbp[1]); out[p++] = ' ';
-  p += itoa_buf(out + p, tbp[2]); out[p++] = '\n';
+  p += itoa_buf(out + p, tbp[2]);
+  /* trailing damage token: "... | r g b ! d\n" (1=changed, 0=identical) */
+  out[p++] = ' '; out[p++] = '!'; out[p++] = ' ';
+  p += itoa_buf(out + p, damage); out[p++] = '\n';
   sc6(SYS_write, 1, (long)out, p, 0, 0, 0);
 
   sc6(SYS_exit, 0, 0, 0, 0, 0, 0);
