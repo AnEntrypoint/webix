@@ -126,6 +126,35 @@ jobs:
           ls -la containers/Xvfb-patched containers/server.xkm
           file containers/Xvfb-patched || true
 
+      - name: Build X-client overlay tarball (xdpyinfo + xsetroot + lib closure)
+        run: |
+          set -eux
+          # The product runs entirely in-page (no apk at runtime), so bundle a
+          # real X client AND its shared-library closure into an overlay tarball
+          # that the host layers into the guest FS before running the client.
+          apk add --no-cache xdpyinfo xsetroot
+          mkdir -p overlay
+          # Collect the client binaries and walk their ldd closure (musl ld + the
+          # libX11/libxcb/... chain), staging each at its absolute guest path.
+          stage() {
+            for f in "$@"; do
+              [ -e "$f" ] || continue
+              d="overlay$(dirname "$f")"; mkdir -p "$d"; cp -aL "$f" "$d/"
+            done
+          }
+          BINS="/usr/bin/xdpyinfo /usr/bin/xsetroot"
+          stage $BINS
+          # Resolve the full .so closure with ldd (scandeps), de-duplicated.
+          libs="$(for b in $BINS; do ldd "$b" 2>/dev/null | awk '{print $3}'; done | grep '^/' | sort -u)"
+          # musl dynamic loader itself (ldd lists it as the interpreter line).
+          libs="$libs $(for b in $BINS; do ldd "$b" 2>/dev/null | awk '/ld-musl/ && /=>/{print $3} /ld-musl/ && !/=>/{print $1}'; done | grep '^/' | sort -u)"
+          for l in $libs; do stage "$l"; done
+          # Always include the musl loader by canonical path.
+          stage /lib/ld-musl-x86_64.so.1
+          ( cd overlay && tar czf ../containers/x-client-overlay.tar.gz . )
+          tar tzf containers/x-client-overlay.tar.gz | head -40
+          ls -la containers/x-client-overlay.tar.gz
+
       - name: Commit artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -140,9 +169,10 @@ jobs:
           rm -rf /tmp/pushrepo
           git clone --depth 1 "$R" /tmp/pushrepo
           mkdir -p /tmp/pushrepo/containers
-          cp containers/Xvfb-patched /tmp/pushrepo/containers/Xvfb-patched
-          cp containers/server.xkm   /tmp/pushrepo/containers/server.xkm
+          cp containers/Xvfb-patched      /tmp/pushrepo/containers/Xvfb-patched
+          cp containers/server.xkm        /tmp/pushrepo/containers/server.xkm
+          cp containers/x-client-overlay.tar.gz /tmp/pushrepo/containers/x-client-overlay.tar.gz
           cd /tmp/pushrepo
-          git add containers/Xvfb-patched containers/server.xkm
-          git commit -m "xorg: GL-less Xvfb-patched (no-fork keymap) + precompiled server.xkm" || { echo "no changes"; exit 0; }
+          git add containers/Xvfb-patched containers/server.xkm containers/x-client-overlay.tar.gz
+          git commit -m "xorg: GL-less Xvfb-patched + server.xkm + X-client overlay (xdpyinfo/xsetroot+libs)" || { echo "no changes"; exit 0; }
           git push "$R" HEAD:main
