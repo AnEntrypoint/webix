@@ -513,6 +513,64 @@ jobs:
           else console.log("XC-smoke RESULT: PROGRESS — client exit="+r.client.exitCode+" out="+cout.slice(0,200));
           EOF
 
+      - name: X-client smoke (PRODUCT path — bundled overlay, no apk)
+        if: ${{ hashFiles('containers/x-client-overlay.tar.gz') != '' }}
+        run: |
+          set -e
+          node --experimental-vm-modules --no-warnings <<'EOF'
+          // Mirrors how sandcastle runs X in-page: NO apk fetch — layer the
+          // bundled x-client-overlay.tar.gz (xdpyinfo + xsetroot + musl .so
+          // closure) into the guest FS, place Xvfb + server.xkm, then
+          // runConcurrent. Proves the product's offline path, not just CI apk.
+          globalThis.self ??= globalThis;
+          const fs = await import("node:fs");
+          const zlib = await import("node:zlib");
+          const { createBlinkHost } = await import("./src/x86_64-blink.js");
+          const host = await createBlinkHost({});
+          host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
+          const FS = host.Module.FS;
+          // Extract the overlay host-side into the guest MEMFS (node tar-less:
+          // use a minimal gz+tar walk via zlib + a tiny ustar parser).
+          const tar = zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz"));
+          let off = 0;
+          const mkdirp = (p) => { const parts=p.split("/").filter(Boolean); let cur=""; for (const s of parts){ cur+="/"+s; try{FS.mkdir(cur);}catch(e){} } };
+          while (off + 512 <= tar.length) {
+            const name = Buffer.from(tar.subarray(off, off+100)).toString("utf8").replace(/\0.*$/,"");
+            if (!name) break;
+            const sz = parseInt(Buffer.from(tar.subarray(off+124, off+124+11)).toString("utf8").replace(/\0.*$/,"").trim()||"0", 8);
+            const type = String.fromCharCode(tar[off+156]);
+            const data = tar.subarray(off+512, off+512+sz);
+            const guestPath = "/" + name.replace(/^\.?\//,"");
+            if (type === "5") { mkdirp(guestPath); }
+            else if (type === "0" || type === "\0" || type === "") {
+              mkdirp(guestPath.replace(/\/[^/]*$/,""));
+              try { FS.writeFile(guestPath, new Uint8Array(data)); FS.chmod(guestPath, 0o755); } catch(e) { console.error("write",guestPath,e&&e.message); }
+            } else if (type === "2") {
+              const link = Buffer.from(tar.subarray(off+157, off+157+100)).toString("utf8").replace(/\0.*$/,"");
+              try { FS.symlink(link, guestPath); } catch(e) {}
+            }
+            off += 512 + Math.ceil(sz/512)*512;
+          }
+          FS.writeFile("/usr/bin/Xvfb", fs.readFileSync("containers/Xvfb-patched")); try { FS.chmod("/usr/bin/Xvfb",0o755); } catch(e) {}
+          const xkm = fs.readFileSync("containers/server.xkm");
+          try { FS.mkdir("/tmp"); } catch(e) {}
+          try { FS.mkdir("/tmp/.X11-unix"); } catch(e) {}
+          for (const p of ["/tmp/server-99.xkm","/tmp/server-0.xkm"]) { try { FS.writeFile(p, xkm); } catch(e) {} }
+          if (!FS.analyzePath("/usr/bin/xdpyinfo").exists) { console.log("XO-smoke: overlay missing xdpyinfo"); process.exit(1); }
+          console.log("XO-smoke: bundled overlay laid in; running Xvfb + xdpyinfo");
+          const r = await host.runConcurrent(
+            FS.readFile("/usr/bin/Xvfb"), FS.readFile("/usr/bin/xdpyinfo"),
+            { serverArgv: [":99","-screen","0","640x480x16","-ac","-noreset","-nolock"],
+              clientProgname: "/usr/bin/xdpyinfo", clientArgv: ["-display",":99"],
+              clientDelayMs: 4000, overallTimeoutMs: 90000 });
+          console.log("XO-smoke client exit:", r.client.exitCode);
+          console.log("XO-smoke client stdout:", JSON.stringify((r.client.stdout||"").slice(0,1500)));
+          const cout = (r.client.stdout||"")+(r.client.stderr||"");
+          const ok = /number of screens|dimensions:|X\.Org/i.test(cout) || r.client.exitCode===0;
+          if (ok) console.log("XO-smoke RESULT: SUCCESS — bundled (offline) X client talked X11 to in-page Xvfb");
+          else { console.log("XO-smoke RESULT: FAIL exit="+r.client.exitCode); process.exit(1); }
+          EOF
+
       - name: Commit rebuilt artifacts
         env:
           BLINK_REPO: ${{ inputs.blink_repo || 'lanmower/blink' }}
