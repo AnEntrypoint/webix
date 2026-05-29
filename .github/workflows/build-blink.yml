@@ -133,12 +133,18 @@ jobs:
           # sysinfo" (the probe would correctly have rejected these; the build
           # already proved this). getentropy() IS provided, so HAVE_GETENTROPY
           # is safe and covers Blink's randomness needs.
+          # HAVE_EPOLL_PWAIT1 gates blink's entire epoll syscall family
+          # (epoll_create/ctl/wait/pwait). The X server (Xvfb) needs epoll for its
+          # event loop -- without it ospoll_create fails ("failed to allocate poll
+          # structure"). emscripten's musl provides the epoll fns, so enable it.
           for SYM in HAVE_PIPE2 HAVE_DUP3 HAVE_MAP_SHARED HAVE_MAP_ANONYMOUS \
                      HAVE_SCHED_YIELD HAVE_SCHED_H HAVE_GETENTROPY HAVE_CLOCK_SETTIME \
                      HAVE_STRCHRNUL HAVE_MEMCCPY HAVE_REALPATH HAVE_SEEKDIR \
                      HAVE_PREADV HAVE_VASPRINTF HAVE_WCWIDTH HAVE_FDATASYNC \
-                     HAVE_SYNC HAVE_STRUCT_TIMEZONE; do
+                     HAVE_SYNC HAVE_STRUCT_TIMEZONE HAVE_EPOLL_PWAIT1; do
             sed -i "s@^// #define $SYM\$@#define $SYM@" "$CFG"
+            # also handle the case where the line is fully absent: append it.
+            grep -qE "^#define $SYM\b" "$CFG" || echo "#define $SYM" >> "$CFG"
           done
           echo "== config.h after patch =="
           grep -nE 'DISABLE_THREADS|DISABLE_SOCKETS|DISABLE_NONPOSIX|HAVE_FORK|HAVE_PIPE2|HAVE_DUP3|HAVE_MAP_SHARED|HAVE_SCHED_YIELD|HAVE_GETENTROPY' "$CFG" || true
