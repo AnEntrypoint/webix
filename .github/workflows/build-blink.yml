@@ -360,6 +360,25 @@ jobs:
                           "stderr:", JSON.stringify((xr.stderr||"").slice(0,200)));
             } catch (e) { console.log("XKBCOMP-standalone threw:", e && e.message); }
           }
+          // Xorg's Popen execs /bin/sh -c "xkbcomp ..."; probe whether /bin/sh
+          // (busybox ash) runs standalone under blink, and what it links.
+          for (const shp of ["/bin/sh","/bin/busybox"]) {
+            if (!FS.analyzePath(shp).exists) { console.log("SH-probe:", shp, "MISSING"); continue; }
+            try {
+              const shb = FS.readFile(shp);
+              // Nested case: sh -c that itself fork+execs xkbcomp -- exactly what
+              // Xorg's Popen does. Exercises the in-VM fork+exec from within a
+              // child that re-forks.
+              const sr = await Promise.race([
+                host.runElf(shb, { progname: shp, argv: ["sh","-c","/usr/bin/xkbcomp -version && echo SHOK"] }),
+                new Promise((res) => setTimeout(() => res({ exitCode: "SHTIMEOUT", stdout:"", stderr:"" }), 20000)),
+              ]);
+              console.log("SH-nested-xkbcomp", shp, "EXIT:", sr.exitCode,
+                          "stdout:", JSON.stringify((sr.stdout||"").slice(0,200)),
+                          "stderr:", JSON.stringify((sr.stderr||"").slice(0,200)));
+              break;
+            } catch (e) { console.log("SH-standalone", shp, "threw:", e && e.message); }
+          }
           const bytes = FS.readFile("/usr/bin/Xvfb");
           // Run it as a REAL X server: a virtual display with a small screen.
           // A working server either keeps running (we time out = it's serving)
