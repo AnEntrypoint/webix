@@ -146,6 +146,11 @@ jobs:
           # Without these the server hits "Error relocating /xserver:
           # pixman_* symbol not found" and never opens the display.
           apk add --root "$ROOT" --initdb --no-cache musl xdpyinfo xsetroot
+          # xkeyboard-config provides /usr/share/X11/xkb (XkbBaseDirectory). The
+          # patched server skips forking xkbcomp but LoadXKM still resolves the
+          # precompiled keymap relative to this base dir; without it the server
+          # falls back to compiling and dies ("XKB: Failed to compile keymap").
+          apk add --root "$ROOT" --no-cache xkeyboard-config 2>/dev/null || echo "skip xkeyboard-config"
           # Server libs: add each tolerantly (some names vary across Alpine).
           for pkg in pixman libxfont2 freetype fontconfig libfontenc \
                      libxshmfence libpng zlib bzip2-libs brotli-libs \
