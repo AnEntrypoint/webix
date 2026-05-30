@@ -142,11 +142,15 @@ jobs:
           apk add --root "$ROOT" --initdb --no-cache musl xdpyinfo xsetroot
           # Drop apk's own DB/metadata from the overlay (guest never runs apk).
           rm -rf "$ROOT/var/cache/apk" "$ROOT/lib/apk" "$ROOT/etc/apk"
+          # Drop dirs the guest already has + that tar can't recreate under blink
+          # (device nodes need mknod = ENOSYS). Keep only the binaries + libraries.
+          rm -rf "$ROOT/dev" "$ROOT/proc" "$ROOT/sys" "$ROOT/run" "$ROOT/tmp" "$ROOT/var" "$ROOT/etc"
           mkdir -p containers
           # Tar the top-level dirs explicitly (NOT `.`): a leading "./" entry makes
-          # busybox `tar -xf -C /` choke trying to recreate "./" . List the real
-          # top dirs present in the staged root.
+          # busybox `tar -xf -C /` choke trying to recreate "./". Only usr + lib
+          # remain (xdpyinfo/xsetroot + their .so closure + ld-musl).
           tops="$(cd "$ROOT" && ls -1)"
+          echo "overlay top dirs: $tops"
           ( cd "$ROOT" && tar czf - $tops ) > containers/x-client-overlay.tar.gz
           echo "overlay key files:"; tar tzf containers/x-client-overlay.tar.gz | grep -iE "bin/xdpyinfo|bin/xsetroot|ld-musl|libX11\.|libxcb\." | head
           ls -la containers/x-client-overlay.tar.gz
