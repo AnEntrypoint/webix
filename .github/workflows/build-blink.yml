@@ -535,8 +535,13 @@ jobs:
           // fork) — exactly what the sandcastle product does. Preserves perms +
           // symlinks the way the running musl loader expects.
           FS.writeFile("/x-client-overlay.tar", zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz")));
-          const ex = await host.runElf(FS.readFile("/bin/busybox"), { argv:["tar","-xf","/x-client-overlay.tar","-C","/"], path:"/bin/busybox" });
-          console.log("XO-smoke overlay extract exit:", ex.exitCode, JSON.stringify((ex.stderr||"").slice(0,300)));
+          const ex = await host.runElf(FS.readFile("/bin/busybox"), { argv:["tar","-xvf","/x-client-overlay.tar","-C","/"], path:"/bin/busybox" });
+          console.log("XO-smoke overlay extract:", ex.exitCode,
+            "out=", JSON.stringify(((ex.stdout||"").slice(0,300))),
+            "err=", JSON.stringify(((ex.stderr||"").slice(0,300))));
+          console.log("XO-smoke fs check xdpyinfo:", FS.analyzePath("/usr/bin/xdpyinfo").exists,
+            "libX11:", FS.analyzePath("/usr/lib/libX11.so.6").exists,
+            "ldmusl:", FS.analyzePath("/lib/ld-musl-x86_64.so.1").exists);
           FS.writeFile("/usr/bin/Xvfb", fs.readFileSync("containers/Xvfb-patched")); try { FS.chmod("/usr/bin/Xvfb",0o755); } catch(e) {}
           const xkm = fs.readFileSync("containers/server.xkm");
           try { FS.mkdir("/tmp"); } catch(e) {}
