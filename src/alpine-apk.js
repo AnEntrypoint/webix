@@ -87,11 +87,26 @@ export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"
     return { ...r, url:meta.url };
   }
 
+  // Remove an installed package: unlink its files from the guest FS + drop the
+  // db entry. Best-effort (leaves shared deps).
+  function remove(name){
+    const p=installed.get(name);
+    if(!p) return { name, removed:false };
+    for(const f of (p.files||[])){ try{ host.Module.FS.unlink(f.startsWith("/")?f:"/"+f); }catch(_){} }
+    installed.delete(name);
+    flushDb();
+    return { name, removed:true };
+  }
+
   return {
     addBytes,
     addUrl,
     addByName,
+    remove,
     repo,
+    // Catalog browse (merged APKINDEX): {packages:[{name,version,summary}], total}.
+    search(query, opts){ return repo.search(query, opts); },
+    pkgInfo(name){ return repo.pkgInfo(name); },
     info(name){ return installed.get(name)||null; },
     list(){ return [...installed.entries()].map(([name,p])=>({ name, version:p.version, fileCount:(p.files||[]).length })); },
     isInstalled(name){ return installed.has(name); }

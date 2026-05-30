@@ -57,6 +57,7 @@ function parseIndexText(text){
       const k=line[0], v=line.slice(2);
       if(k==="P") rec.name=v;
       else if(k==="V") rec.version=v;
+      else if(k==="T") rec.summary=v;          // pkgdesc (one-line title)
       else if(k==="D") rec.depends=v.split(" ").filter(Boolean);
       else if(k==="p") rec.provides=v.split(" ").filter(Boolean);
     }
@@ -98,6 +99,27 @@ export function makeRepo({ fetchImpl=fetch, repos=DEFAULT_REPOS, proxies=DEFAULT
       const M=await db();
       const r=M.byName.get(name); if(!r) return null;
       return { url:`${M.repoOf.get(name)}/${r.name}-${r.version}.apk`, version:r.version, depends:r.depends };
+    },
+    // Browse the merged repo index: substring match over name+summary, optional
+    // GUI-only filter (depends on an X/display lib), paginated. Powers the
+    // in-page App Store catalog without the removed remote /packages service.
+    async search(query, { gui=false, offset=0, limit=50 }={}){
+      const M=await db();
+      const q=(query||"").trim().toLowerCase();
+      const isGui=(r)=>r.depends.some(d=>/^(libx11|libxcb|gtk|qt|libxext|libxrender|cairo|pango|mesa|wayland)/i.test(d));
+      const all=[];
+      for(const r of M.byName.values()){
+        if(q && !(r.name.toLowerCase().includes(q) || (r.summary||"").toLowerCase().includes(q))) continue;
+        if(gui && !isGui(r)) continue;
+        all.push({ name:r.name, version:r.version, summary:r.summary||"" });
+      }
+      all.sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);
+      return { packages:all.slice(offset, offset+limit), total:all.length };
+    },
+    async pkgInfo(name){
+      const M=await db();
+      const r=M.byName.get(name); if(!r) return null;
+      return { name:r.name, version:r.version, summary:r.summary||"", depends:r.depends, repo:M.repoOf.get(name) };
     }
   };
 }
