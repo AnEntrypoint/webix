@@ -450,10 +450,19 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       const clientH=Module._blinkenlib_vm_spawn(0);
       Module._blinkenlib_run_thread_slot(clientH,1);
       const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+      // Pump the main-thread proxy queue each poll tick IN ADDITION to the
+      // always-on server interval. The proven one-shot runConcurrent pumps
+      // synchronously every poll; relying on setInterval alone left the slot-1
+      // client wedged (its proxied syscalls weren't serviced promptly enough,
+      // so thread_done never flipped and the client never painted the root).
+      const pumpProxy = typeof Module._emscripten_main_thread_process_queued_calls==="function"
+        ? () => { try{ Module._emscripten_main_thread_process_queued_calls() }catch(_){} }
+        : () => {};
       const t0=Date.now(); let timedOut=false;
       while(!Module._blinkenlib_thread_done_slot(1)){
         if(Date.now()-t0>timeoutMs){ timedOut=true; break; }
-        await sleep(20); // the always-on _xpump services the worker syscalls
+        pumpProxy();
+        await sleep(20);
       }
       const exitCode=Module._blinkenlib_thread_done_slot(1)?Module._blinkenlib_thread_status_slot(1):"RUNNING";
       return { timedOut, exitCode, stdout:decode(outBytes), stderr:decode(errBytes) };
