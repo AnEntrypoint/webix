@@ -153,6 +153,42 @@ jobs:
             apk add --root "$ROOT" --no-cache "$pkg" 2>/dev/null || echo "skip $pkg"
           done
           rm -f "$ROOT/usr/bin/Xvfb"
+          # Collapse the lib dirs to exactly the names the dynamic loader opens
+          # (SONAMEs like libX11.so.6), each as a single REAL file. Removes
+          # symlinks (guest busybox tar can't create them) AND the duplicate
+          # fully-versioned + dev (.so) aliases, keeping the overlay tiny.
+          python3 - "$ROOT" <<'PY'
+          import os, sys, re
+          root = sys.argv[1]
+          for d in (os.path.join(root,"usr","lib"), os.path.join(root,"lib")):
+            if not os.path.isdir(d): continue
+            entries = list(os.listdir(d))
+            # Read the REAL bytes for each SONAME (libfoo.so.<major>) BEFORE we
+            # touch anything, following symlinks to the real file.
+            keep = {}   # SONAME basename -> bytes
+            for name in entries:
+              m = re.match(r'(.*\.so\.\d+)(\.\d+)*$', name)
+              if not m: continue
+              son = m.group(1)
+              tgt = os.path.realpath(os.path.join(d, name))
+              if os.path.isfile(tgt):
+                with open(tgt, "rb") as f:
+                  keep.setdefault(son, f.read())
+            # Wipe the dir entirely (links + versioned reals), then write exactly
+            # one real file per SONAME.
+            for name in entries:
+              p = os.path.join(d, name)
+              try: os.unlink(p)
+              except OSError:
+                try: os.rmdir(p)
+                except OSError: pass
+            for son, data in keep.items():
+              with open(os.path.join(d, son), "wb") as f:
+                f.write(data)
+          PY
+          for must in libpixman-1.so.0 libX11.so.6 libxcb.so.1 libXfont2.so.2 libfreetype.so.6; do
+            ls -la "$ROOT/usr/lib/$must" "$ROOT/lib/$must" 2>/dev/null | head -1 || echo "WARN missing $must after collapse"
+          done
           # Drop apk's own DB/metadata from the overlay (guest never runs apk).
           rm -rf "$ROOT/var/cache/apk" "$ROOT/lib/apk" "$ROOT/etc/apk"
           # Drop dirs the guest already has + that tar can't recreate under blink

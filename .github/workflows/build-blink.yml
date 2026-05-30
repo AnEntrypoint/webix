@@ -530,27 +530,13 @@ jobs:
           const host = await createBlinkHost({});
           host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
           const FS = host.Module.FS;
-          // Untar in JS straight into the guest MEMFS: gunzip host-side (busybox
-          // -z would fork), then walk the ustar stream creating dirs/files/
-          // symlinks via FS (busybox tar can't create symlinks under blink, and
-          // the loader needs the SONAME symlinks). This mirrors what sandcastle
-          // does in-browser.
-          const tarBuf = zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz"));
-          const oct = (b,o,l)=>parseInt(Buffer.from(b.subarray(o,o+l)).toString("utf8").replace(/\0.*$/,"").trim()||"0",8);
-          const str = (b,o,l)=>Buffer.from(b.subarray(o,o+l)).toString("utf8").replace(/\0.*$/,"");
-          const mkdirp=(p)=>{let cur="";for(const s of p.split("/").filter(Boolean)){cur+="/"+s;try{FS.mkdir(cur);}catch(e){}}};
-          let off=0, made=0, links=0;
-          while (off+512<=tarBuf.length){
-            const name=str(tarBuf,off,100); if(!name){break;}
-            const sz=oct(tarBuf,124,12); const type=String.fromCharCode(tarBuf[off+156]||48);
-            const gp="/"+name.replace(/^\.?\/*/,"").replace(/\/$/,"");
-            const data=tarBuf.subarray(off+512,off+512+sz);
-            if(type==="5"){ mkdirp(gp); }
-            else if(type==="2"){ const tgt=str(tarBuf,off+157,100); mkdirp(gp.replace(/\/[^/]*$/,"")); try{FS.unlink(gp);}catch(e){} try{FS.symlink(tgt,gp);links++;}catch(e){console.error("symlink",gp,e&&e.message);} }
-            else { mkdirp(gp.replace(/\/[^/]*$/,"")); try{FS.writeFile(gp,new Uint8Array(data));FS.chmod(gp,0o755);made++;}catch(e){console.error("write",gp,e&&e.message);} }
-            off+=512+Math.ceil(sz/512)*512;
-          }
-          console.log("XO-smoke overlay extracted: files="+made+" symlinks="+links);
+          // busybox `tar -z` forks gunzip (ENOSYS under blink), so gunzip
+          // host-side and feed busybox a PLAIN tar with `tar -xf` (no fork). The
+          // overlay has NO symlinks (SONAMEs are real files), so busybox tar
+          // extracts it cleanly. This is exactly the sandcastle product path.
+          FS.writeFile("/x-client-overlay.tar", zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz")));
+          const ex = await host.runElf(FS.readFile("/bin/busybox"), { argv:["tar","-xf","/x-client-overlay.tar","-C","/"], path:"/bin/busybox" });
+          console.log("XO-smoke overlay extract exit:", ex.exitCode, JSON.stringify(((ex.stderr||"")+(ex.stdout||"")).slice(-300)));
           console.log("XO-smoke fs check xdpyinfo:", FS.analyzePath("/usr/bin/xdpyinfo").exists,
             "libX11:", FS.analyzePath("/usr/lib/libX11.so.6").exists,
             "pixman:", FS.analyzePath("/usr/lib/libpixman-1.so.0").exists,
