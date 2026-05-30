@@ -491,9 +491,14 @@ jobs:
           try { const stub = fs.readFileSync("containers/libGL-stub.so"); for (const p of ["/usr/lib/libGL.so.1","/usr/lib/libGL.so.1.2.0"]) { try { FS.writeFile(p, stub); } catch(e) {} } } catch(e) {}
           FS.writeFile("/usr/bin/Xvfb", fs.readFileSync("containers/Xvfb-patched")); try { FS.chmod("/usr/bin/Xvfb",0o755); } catch(e) {}
           const xkm = fs.readFileSync("containers/server.xkm");
-          try { FS.mkdir("/tmp"); } catch(e) {}
-          try { FS.mkdir("/tmp/.X11-unix"); } catch(e) {}
-          for (const p of ["/tmp/server-99.xkm","/tmp/server-0.xkm"]) { try { FS.writeFile(p, xkm); } catch(e) {} }
+          { const mkd=(p)=>{let c="";for(const s of p.split("/").filter(Boolean)){c+="/"+s;try{FS.mkdir(c);}catch(e){}}};
+            mkd("/tmp/.X11-unix"); mkd("/var/lib/xkb"); mkd("/usr/share/X11/xkb/compiled");
+            for (const d of ["/tmp","/var/lib/xkb","/usr/share/X11/xkb/compiled",""]) {
+              for (const n of ["server-99.xkm","server-0.xkm"]) {
+                try { FS.writeFile(d+"/"+n, xkm); } catch(e) {}
+              }
+            }
+          }
           const clientPath = FS.analyzePath("/usr/bin/xdpyinfo").exists ? "/usr/bin/xdpyinfo" : "/usr/bin/xsetroot";
           const clientArgv = clientPath.endsWith("xdpyinfo") ? [] : ["-solid","blue"];
           console.log("XC-smoke: server=/usr/bin/Xvfb client="+clientPath+" "+JSON.stringify(clientArgv));
@@ -566,9 +571,14 @@ jobs:
             "ldmusl:", FS.analyzePath("/lib/ld-musl-x86_64.so.1").exists);
           FS.writeFile("/usr/bin/Xvfb", fs.readFileSync("containers/Xvfb-patched")); try { FS.chmod("/usr/bin/Xvfb",0o755); } catch(e) {}
           const xkm = fs.readFileSync("containers/server.xkm");
-          try { FS.mkdir("/tmp"); } catch(e) {}
-          try { FS.mkdir("/tmp/.X11-unix"); } catch(e) {}
-          for (const p of ["/tmp/server-99.xkm","/tmp/server-0.xkm"]) { try { FS.writeFile(p, xkm); } catch(e) {} }
+          { const mkd=(p)=>{let c="";for(const s of p.split("/").filter(Boolean)){c+="/"+s;try{FS.mkdir(c);}catch(e){}}};
+            mkd("/tmp/.X11-unix"); mkd("/var/lib/xkb"); mkd("/usr/share/X11/xkb/compiled");
+            for (const d of ["/tmp","/var/lib/xkb","/usr/share/X11/xkb/compiled",""]) {
+              for (const n of ["server-99.xkm","server-0.xkm"]) {
+                try { FS.writeFile(d+"/"+n, xkm); } catch(e) {}
+              }
+            }
+          }
           if (!FS.analyzePath("/usr/bin/xdpyinfo").exists) { console.log("XO-smoke: overlay missing xdpyinfo"); process.exit(1); }
           console.log("XO-smoke: bundled overlay laid in; running Xvfb + xdpyinfo");
           const r = await host.runConcurrent(
