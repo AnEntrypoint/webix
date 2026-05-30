@@ -139,14 +139,19 @@ jobs:
           mkdir -p "$ROOT/etc/apk"
           cp -a /etc/apk/repositories "$ROOT/etc/apk/repositories"
           cp -a /etc/apk/keys "$ROOT/etc/apk/keys"
-          # Install the X CLIENT closure AND the Xvfb SERVER's runtime closure
-          # (pixman, libxfont2, freetype, ...) — the patched Xvfb we ship is
-          # dynamically linked against them, so without these the server fails
-          # with "Error relocating /xserver: pixman_* symbol not found" and never
-          # opens the display. `xvfb` pulls the server's full dep set.
-          apk add --root "$ROOT" --initdb --no-cache musl xvfb xdpyinfo xsetroot
-          # The distro Xvfb itself isn't used (we ship containers/Xvfb-patched);
-          # drop it so the overlay carries libs, not the unpatched server binary.
+          # Install the X CLIENT closure plus ONLY the shared LIBRARIES the
+          # patched Xvfb links against (pixman, libxfont2, freetype, fontenc,
+          # libxshmfence, ...) — NOT the full `xvfb` package (which drags in
+          # fonts + mesa/GL and balloons the overlay past GitHub's 100MB limit).
+          # Without these the server hits "Error relocating /xserver:
+          # pixman_* symbol not found" and never opens the display.
+          apk add --root "$ROOT" --initdb --no-cache musl xdpyinfo xsetroot
+          # Server libs: add each tolerantly (some names vary across Alpine).
+          for pkg in pixman libxfont2 freetype fontconfig libfontenc \
+                     libxshmfence libpng zlib bzip2-libs brotli-libs \
+                     libxcb libxau libxdmcp libbsd libmd expat util-linux-misc; do
+            apk add --root "$ROOT" --no-cache "$pkg" 2>/dev/null || echo "skip $pkg"
+          done
           rm -f "$ROOT/usr/bin/Xvfb"
           # Drop apk's own DB/metadata from the overlay (guest never runs apk).
           rm -rf "$ROOT/var/cache/apk" "$ROOT/lib/apk" "$ROOT/etc/apk"
@@ -165,7 +170,12 @@ jobs:
           # symlink syscall aborts extraction), so deref is required; the loader
           # still finds libX11.so.6 etc. because they're present as real files.
           ( cd "$ROOT" && tar czhf - $tops ) > containers/x-client-overlay.tar.gz
-          echo "overlay key files:"; tar tzf containers/x-client-overlay.tar.gz | grep -iE "bin/xdpyinfo|bin/xsetroot|ld-musl|libX11\.|libxcb\." | head
+          echo "overlay key files:"; tar tzf containers/x-client-overlay.tar.gz | grep -iE "bin/xdpyinfo|bin/xsetroot|ld-musl|libX11\.|libxcb\.|pixman|libXfont2|libfreetype" | head -20
+          sz=$(stat -c%s containers/x-client-overlay.tar.gz)
+          echo "overlay size: $sz bytes"
+          # Hard gate: GitHub rejects files >100MB. Keep the curated overlay small.
+          test "$sz" -lt 94000000 || { echo "FATAL: overlay too big ($sz) — trim package list"; exit 1; }
+          tar tzf containers/x-client-overlay.tar.gz | grep -qi pixman || { echo "FATAL: pixman missing from overlay"; exit 1; }
           ls -la containers/x-client-overlay.tar.gz
 
       - name: Commit artifacts
