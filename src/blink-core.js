@@ -186,6 +186,8 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   }
   // Reusable output buffer for the page-assembled framebuffer copy.
   let fbCopyBuf=null;
+  // Separate output buffer for the RGB565 -> RGBA expansion (16bpp guests).
+  let fbRgbaBuf=null;
   // Return the guest framebuffer pixels as a contiguous Uint8ClampedArray.
   //
   // IMPORTANT: blink's SpyAddress (memory.c LookupAddress2) returns a host
@@ -215,7 +217,32 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       } // unmapped page -> leave as-is (transparent/previous)
       off+=chunk;
     }
-    return { ...info, pixels:fbCopyBuf };
+    // The canvas blit path expects 4-byte RGBA. A 32bpp guest framebuffer
+    // (stride == width*4) is already in that layout (BGRX/RGBX) and returned as
+    // is. A 16bpp framebuffer (stride == width*2, e.g. Xvfb -screen WxHx16 =
+    // RGB565) must be expanded to RGBA or it renders as garbage. Detect by
+    // bytes-per-pixel and expand RGB565 -> RGBA into a separate output buffer.
+    const bpp=info.width>0?info.stride/info.width:4;
+    if(bpp===2){
+      const w=info.width, h=info.height, n=w*h;
+      if(!fbRgbaBuf||fbRgbaBuf.length!==n*4) fbRgbaBuf=new Uint8ClampedArray(n*4);
+      // fbCopyBuf holds RGB565 little-endian; row stride may exceed w*2 (padding).
+      for(let y=0;y<h;y++){
+        let si=y*info.stride, di=y*w*4;
+        for(let x=0;x<w;x++,si+=2,di+=4){
+          const lo=fbCopyBuf[si], hi=fbCopyBuf[si+1];
+          const v=lo|(hi<<8);
+          // RGB565 -> 8-bit per channel (scale 5/6/5 bits to 0..255)
+          const r=(v>>11)&0x1f, g=(v>>5)&0x3f, b=v&0x1f;
+          fbRgbaBuf[di]=(r*527+23)>>6;     // r5 -> r8
+          fbRgbaBuf[di+1]=(g*259+33)>>6;   // g6 -> g8
+          fbRgbaBuf[di+2]=(b*527+23)>>6;   // b5 -> b8
+          fbRgbaBuf[di+3]=255;
+        }
+      }
+      return { ...info, width:w, height:h, stride:w*4, bpp:4, pixels:fbRgbaBuf };
+    }
+    return { ...info, bpp, pixels:fbCopyBuf };
   }
   // Host -> guest input. Maps display.js's event shape to the C input device
   // (blinkenlib_push_input(type, code, x, y, value)). type: 1=key 2=motion
