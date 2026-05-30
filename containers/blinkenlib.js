@@ -81,7 +81,7 @@ var readyPromise = new Promise((resolve, reject) => {
   readyPromiseReject = reject;
 });
 
-[ "_blinkenlib_get_fb_vaddr", "_blinkenlib_get_fb_width", "_blinkenlib_get_fb_height", "_blinkenlib_get_fb_stride", "_blinkenlib_get_fb_generation", "_blinkenlib_get_fb_ptr", "_blinkenlib_spy_address", "_blinkenlib_push_input", "_blinkenlib_input_pending", "_blinkenlib_vm_current", "_blinkenlib_vm_set", "_blinkenlib_vm_spawn", "_blinkenlib_continue", "_blinkenlib_run_thread", "_blinkenlib_run_thread_slot", "_blinkenlib_thread_done", "_blinkenlib_thread_status", "_blinkenlib_thread_done_slot", "_blinkenlib_thread_status_slot", "___indirect_function_table", "_blinkenlib_run_fast", "_blinkenlib_run", "_blinkenlib_starti", "_blinkenlib_start", "_blinkenlib_stepi", "_blinkenlib_preempt_resume", "_blinkenlib_faketty_resume", "_blinkenlib_get_clstruct", "_blinkenlib_get_argc_string", "_blinkenlib_get_argv_string", "_blinkenlib_get_progname_string", "_main", "onRuntimeInitialized" ].forEach(prop => {
+[ "_blinkenlib_get_fb_vaddr", "_blinkenlib_get_fb_width", "_blinkenlib_get_fb_height", "_blinkenlib_get_fb_stride", "_blinkenlib_get_fb_generation", "_blinkenlib_get_fb_ptr", "_blinkenlib_spy_address", "_blinkenlib_push_input", "_blinkenlib_input_pending", "_blinkenlib_vm_current", "_blinkenlib_vm_set", "_blinkenlib_vm_spawn", "_blinkenlib_continue", "_blinkenlib_run_thread", "_blinkenlib_run_thread_slot", "_blinkenlib_thread_done", "_blinkenlib_thread_status", "_blinkenlib_thread_done_slot", "_blinkenlib_thread_status_slot", "_emscripten_main_thread_process_queued_calls", "___indirect_function_table", "_blinkenlib_run_fast", "_blinkenlib_run", "_blinkenlib_starti", "_blinkenlib_start", "_blinkenlib_stepi", "_blinkenlib_preempt_resume", "_blinkenlib_faketty_resume", "_blinkenlib_get_clstruct", "_blinkenlib_get_argc_string", "_blinkenlib_get_argv_string", "_blinkenlib_get_progname_string", "_main", "onRuntimeInitialized" ].forEach(prop => {
   if (!Object.getOwnPropertyDescriptor(readyPromise, prop)) {
     Object.defineProperty(readyPromise, prop, {
       get: () => abort("You are getting " + prop + " on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js"),
@@ -8296,7 +8296,7 @@ var __emscripten_thread_init = createExportWrapper("_emscripten_thread_init", 6)
 
 var __emscripten_thread_crashed = createExportWrapper("_emscripten_thread_crashed", 0);
 
-var _emscripten_main_thread_process_queued_calls = createExportWrapper("emscripten_main_thread_process_queued_calls", 0);
+var _emscripten_main_thread_process_queued_calls = Module["_emscripten_main_thread_process_queued_calls"] = createExportWrapper("emscripten_main_thread_process_queued_calls", 0);
 
 var _htons = createExportWrapper("htons", 1);
 
