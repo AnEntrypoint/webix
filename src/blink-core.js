@@ -352,9 +352,21 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       const clientH=spawn("/xclient",[clientProgname.split("/").pop(),...clientArgv]);
       Module._blinkenlib_run_thread_slot(clientH, 1);
       const t0=Date.now(); let timedOut=false;
+      // The X server + client run on emscripten pthreads (Web Workers in the
+      // browser). Blocking syscalls those workers make can be PROXIED to the
+      // main thread; if the main thread just setTimeout-sleeps without servicing
+      // the proxy queue, the worker stalls and thread_done never flips (the
+      // client handshake wedges in-browser, though it completes under node where
+      // libuv schedules the worker threads). Pump the main-thread proxy queue
+      // each poll tick so the worker syscalls get serviced. Symbol is present in
+      // the -pthread build; guard for the non-threaded build.
+      const pumpProxy = typeof Module._emscripten_main_thread_process_queued_calls === "function"
+        ? () => { try { Module._emscripten_main_thread_process_queued_calls(); } catch(_){} }
+        : () => {};
       while(!Module._blinkenlib_thread_done_slot(1)){
         if(Date.now()-t0>overallTimeoutMs){ timedOut=true; break; }
-        await sleep(100);
+        pumpProxy();
+        await sleep(20);
       }
       const clientCode=Module._blinkenlib_thread_done_slot(1)?Module._blinkenlib_thread_status_slot(1):"RUNNING";
       const out=decode(outBytes), err=decode(errBytes);
