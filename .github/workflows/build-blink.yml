@@ -530,11 +530,12 @@ jobs:
           const host = await createBlinkHost({});
           host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
           const FS = host.Module.FS;
-          // Extract the overlay with the guest's OWN busybox tar — exactly the
-          // product path (sandcastle runs `tar -xzf` in-guest). This preserves
-          // perms + symlinks the way the running musl loader expects.
-          FS.writeFile("/x-client-overlay.tar.gz", new Uint8Array(fs.readFileSync("containers/x-client-overlay.tar.gz")));
-          const ex = await host.runElf(FS.readFile("/bin/busybox"), { argv:["tar","-xzf","/x-client-overlay.tar.gz","-C","/"], path:"/bin/busybox" });
+          // busybox `tar -z` forks gunzip (fork is ENOSYS under blink), so
+          // gunzip host-side and feed busybox a PLAIN tar with `tar -xf` (no
+          // fork) — exactly what the sandcastle product does. Preserves perms +
+          // symlinks the way the running musl loader expects.
+          FS.writeFile("/x-client-overlay.tar", zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz")));
+          const ex = await host.runElf(FS.readFile("/bin/busybox"), { argv:["tar","-xf","/x-client-overlay.tar","-C","/"], path:"/bin/busybox" });
           console.log("XO-smoke overlay extract exit:", ex.exitCode, JSON.stringify((ex.stderr||"").slice(0,300)));
           FS.writeFile("/usr/bin/Xvfb", fs.readFileSync("containers/Xvfb-patched")); try { FS.chmod("/usr/bin/Xvfb",0o755); } catch(e) {}
           const xkm = fs.readFileSync("containers/server.xkm");
