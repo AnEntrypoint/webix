@@ -530,13 +530,34 @@ jobs:
           const host = await createBlinkHost({});
           host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
           const FS = host.Module.FS;
-          // busybox `tar -z` forks gunzip (ENOSYS under blink), so gunzip
-          // host-side and feed busybox a PLAIN tar with `tar -xf` (no fork). The
-          // overlay has NO symlinks (SONAMEs are real files), so busybox tar
-          // extracts it cleanly. This is exactly the sandcastle product path.
-          FS.writeFile("/x-client-overlay.tar", zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz")));
-          const ex = await host.runElf(FS.readFile("/bin/busybox"), { argv:["tar","-xf","/x-client-overlay.tar","-C","/"], path:"/bin/busybox" });
-          console.log("XO-smoke overlay extract exit:", ex.exitCode, JSON.stringify(((ex.stderr||"")+(ex.stdout||"")).slice(-300)));
+          // Untar in JS into the guest MEMFS (gunzip host-side; the overlay has
+          // no symlinks). Handles GNU long-name ('L') and PAX ('x') extended
+          // headers — busybox tar aborts on those under blink. This mirrors the
+          // sandcastle in-browser untar.
+          const tarBuf = zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz"));
+          const str=(b,o,l)=>Buffer.from(b.subarray(o,o+l)).toString("utf8").replace(/\0.*$/,"");
+          const oct=(b,o,l)=>parseInt(str(b,o,l).trim()||"0",8);
+          const mkdirp=(p)=>{let c="";for(const s of p.split("/").filter(Boolean)){c+="/"+s;try{FS.mkdir(c);}catch(e){}}};
+          let off=0, made=0, pending=null;
+          while(off+512<=tarBuf.length){
+            let name=str(tarBuf,off,100);
+            const sz=oct(tarBuf,124,12), type=String.fromCharCode(tarBuf[off+156]||48);
+            const body=tarBuf.subarray(off+512,off+512+sz);
+            const adv=512+Math.ceil(sz/512)*512;
+            if(type==="L"){ pending=Buffer.from(body).toString("utf8").replace(/\0.*$/,""); off+=adv; continue; }
+            if(type==="x"||type==="g"){ // PAX: look for a path=… record
+              const txt=Buffer.from(body).toString("utf8");
+              const m=txt.match(/\d+ path=([^\n]+)\n/); if(m) pending=m[1];
+              off+=adv; continue; }
+            if(pending){ name=pending; pending=null; }
+            if(!name){ off+=512; continue; }
+            const gp="/"+name.replace(/^\.?\/*/,"").replace(/\/$/,"");
+            if(type==="5"){ mkdirp(gp); }
+            else if(type==="0"||type==="\0"||type===""||type==="7"){ mkdirp(gp.replace(/\/[^/]*$/,"")); try{FS.writeFile(gp,new Uint8Array(body));FS.chmod(gp,0o755);made++;}catch(e){console.error("w",gp,e&&e.message);} }
+            // (no symlink/hardlink entries expected — overlay is collapsed)
+            off+=adv;
+          }
+          console.log("XO-smoke overlay extract: files="+made);
           console.log("XO-smoke fs check xdpyinfo:", FS.analyzePath("/usr/bin/xdpyinfo").exists,
             "libX11:", FS.analyzePath("/usr/lib/libX11.so.6").exists,
             "pixman:", FS.analyzePath("/usr/lib/libpixman-1.so.0").exists,
