@@ -139,7 +139,15 @@ jobs:
           mkdir -p "$ROOT/etc/apk"
           cp -a /etc/apk/repositories "$ROOT/etc/apk/repositories"
           cp -a /etc/apk/keys "$ROOT/etc/apk/keys"
-          apk add --root "$ROOT" --initdb --no-cache musl xdpyinfo xsetroot
+          # Install the X CLIENT closure AND the Xvfb SERVER's runtime closure
+          # (pixman, libxfont2, freetype, ...) — the patched Xvfb we ship is
+          # dynamically linked against them, so without these the server fails
+          # with "Error relocating /xserver: pixman_* symbol not found" and never
+          # opens the display. `xvfb` pulls the server's full dep set.
+          apk add --root "$ROOT" --initdb --no-cache musl xvfb xdpyinfo xsetroot
+          # The distro Xvfb itself isn't used (we ship containers/Xvfb-patched);
+          # drop it so the overlay carries libs, not the unpatched server binary.
+          rm -f "$ROOT/usr/bin/Xvfb"
           # Drop apk's own DB/metadata from the overlay (guest never runs apk).
           rm -rf "$ROOT/var/cache/apk" "$ROOT/lib/apk" "$ROOT/etc/apk"
           # Drop dirs the guest already has + that tar can't recreate under blink
