@@ -202,7 +202,12 @@ jobs:
           # fonts + mesa/GL and balloons the overlay past GitHub's 100MB limit).
           # Without these the server hits "Error relocating /xserver:
           # pixman_* symbol not found" and never opens the display.
-          apk add --root "$ROOT" --initdb --no-cache musl xdpyinfo xsetroot
+          # xdpyinfo/xsetroot are the smoke clients; xeyes/xclock/xcalc are the
+          # dock X apps (sandcastle desktop) so a dock launch finds a real binary
+          # in the overlay instead of falling back to a slow apk-install in-guest.
+          apk add --root "$ROOT" --initdb --no-cache musl xdpyinfo xsetroot \
+            xeyes xclock xcalc 2>/dev/null \
+            || apk add --root "$ROOT" --initdb --no-cache musl xdpyinfo xsetroot
           # xkeyboard-config provides /usr/share/X11/xkb (XkbBaseDirectory). The
           # patched server skips forking xkbcomp but LoadXKM still resolves the
           # precompiled keymap relative to this base dir; without it the server
@@ -211,7 +216,9 @@ jobs:
           # Server libs: add each tolerantly (some names vary across Alpine).
           for pkg in pixman libxfont2 freetype fontconfig libfontenc \
                      libxshmfence libpng zlib bzip2-libs brotli-libs \
-                     libxcb libxau libxdmcp libbsd libmd expat util-linux-misc; do
+                     libxcb libxau libxdmcp libbsd libmd expat util-linux-misc \
+                     libxt libxmu libxext libxrender libxaw libxpm libxft \
+                     libxkbfile libice libsm; do
             apk add --root "$ROOT" --no-cache "$pkg" 2>/dev/null || echo "skip $pkg"
           done
           rm -f "$ROOT/usr/bin/Xvfb"
@@ -267,7 +274,7 @@ jobs:
           # via the blink FS directly (busybox tar can't symlink under blink, and
           # -h deref blew the overlay past GitHub's 100MB limit).
           ( cd "$ROOT" && tar czf - $tops ) > containers/x-client-overlay.tar.gz
-          echo "overlay key files:"; tar tzf containers/x-client-overlay.tar.gz | grep -iE "bin/xdpyinfo|bin/xsetroot|ld-musl|libX11\.|libxcb\.|pixman|libXfont2|libfreetype" | head -20
+          echo "overlay key files:"; tar tzf containers/x-client-overlay.tar.gz | grep -iE "bin/xdpyinfo|bin/xsetroot|bin/xeyes|bin/xclock|bin/xcalc|ld-musl|libX11\.|libxcb\.|pixman|libXfont2|libfreetype|libXt\.|libXaw|libXmu" | head -30
           sz=$(stat -c%s containers/x-client-overlay.tar.gz)
           echo "overlay size: $sz bytes"
           # Hard gate: GitHub rejects files >100MB. Keep the curated overlay small.
