@@ -151,11 +151,12 @@ jobs:
           # remain (xdpyinfo/xsetroot + their .so closure + ld-musl).
           tops="$(cd "$ROOT" && ls -1)"
           echo "overlay top dirs: $tops"
-          # Keep symlinks (the loader needs the SONAME links e.g. libX11.so.6 ->
-          # libX11.so.6.4.0). Order matters for busybox tar extraction: real
-          # files must precede the symlinks pointing at them, which GNU tar does
-          # naturally here.
-          ( cd "$ROOT" && tar czf - $tops ) > containers/x-client-overlay.tar.gz
+          # -h dereferences symlinks so every name (incl SONAME links like
+          # libX11.so.6) is stored as a regular file with the real content. The
+          # guest's busybox tar in this blink build cannot create symlinks (the
+          # symlink syscall aborts extraction), so deref is required; the loader
+          # still finds libX11.so.6 etc. because they're present as real files.
+          ( cd "$ROOT" && tar czhf - $tops ) > containers/x-client-overlay.tar.gz
           echo "overlay key files:"; tar tzf containers/x-client-overlay.tar.gz | grep -iE "bin/xdpyinfo|bin/xsetroot|ld-musl|libX11\.|libxcb\." | head
           ls -la containers/x-client-overlay.tar.gz
 

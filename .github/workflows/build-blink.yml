@@ -556,6 +556,7 @@ jobs:
               clientDelayMs: 4000, overallTimeoutMs: 90000 });
           console.log("XO-smoke client exit:", r.client.exitCode);
           console.log("XO-smoke client stdout:", JSON.stringify((r.client.stdout||"").slice(0,1500)));
+          console.log("XO-smoke client stderr:", JSON.stringify((r.client.stderr||"").slice(-1200)));
           const cout = (r.client.stdout||"")+(r.client.stderr||"");
           const ok = /number of screens|dimensions:|X\.Org/i.test(cout) || r.client.exitCode===0;
           if (ok) console.log("XO-smoke RESULT: SUCCESS — bundled (offline) X client talked X11 to in-page Xvfb");
