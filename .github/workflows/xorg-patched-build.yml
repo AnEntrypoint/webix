@@ -143,7 +143,11 @@ jobs:
           # Drop apk's own DB/metadata from the overlay (guest never runs apk).
           rm -rf "$ROOT/var/cache/apk" "$ROOT/lib/apk" "$ROOT/etc/apk"
           mkdir -p containers
-          ( cd "$ROOT" && tar czf - . ) > containers/x-client-overlay.tar.gz
+          # Tar the top-level dirs explicitly (NOT `.`): a leading "./" entry makes
+          # busybox `tar -xf -C /` choke trying to recreate "./" . List the real
+          # top dirs present in the staged root.
+          tops="$(cd "$ROOT" && ls -1)"
+          ( cd "$ROOT" && tar czf - $tops ) > containers/x-client-overlay.tar.gz
           echo "overlay key files:"; tar tzf containers/x-client-overlay.tar.gz | grep -iE "bin/xdpyinfo|bin/xsetroot|ld-musl|libX11\.|libxcb\." | head
           ls -la containers/x-client-overlay.tar.gz
 
