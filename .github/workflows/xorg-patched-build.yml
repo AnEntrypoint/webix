@@ -164,12 +164,11 @@ jobs:
           # remain (xdpyinfo/xsetroot + their .so closure + ld-musl).
           tops="$(cd "$ROOT" && ls -1)"
           echo "overlay top dirs: $tops"
-          # -h dereferences symlinks so every name (incl SONAME links like
-          # libX11.so.6) is stored as a regular file with the real content. The
-          # guest's busybox tar in this blink build cannot create symlinks (the
-          # symlink syscall aborts extraction), so deref is required; the loader
-          # still finds libX11.so.6 etc. because they're present as real files.
-          ( cd "$ROOT" && tar czhf - $tops ) > containers/x-client-overlay.tar.gz
+          # Keep symlinks (SONAME links the loader needs) — small overlay. The
+          # consumer (sandcastle / XO-smoke) extracts in JS and creates symlinks
+          # via the blink FS directly (busybox tar can't symlink under blink, and
+          # -h deref blew the overlay past GitHub's 100MB limit).
+          ( cd "$ROOT" && tar czf - $tops ) > containers/x-client-overlay.tar.gz
           echo "overlay key files:"; tar tzf containers/x-client-overlay.tar.gz | grep -iE "bin/xdpyinfo|bin/xsetroot|ld-musl|libX11\.|libxcb\.|pixman|libXfont2|libfreetype" | head -20
           sz=$(stat -c%s containers/x-client-overlay.tar.gz)
           echo "overlay size: $sz bytes"
