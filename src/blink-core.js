@@ -374,6 +374,65 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
                client:{ exitCode:clientCode, stdout:out, stderr:err },
                server:{ exitCode:"RUNNING", stdout:out, stderr:err } };
     },
+    // PERSISTENT X run model (live windows). Unlike runConcurrent (one-shot:
+    // blocks the caller until the client exits), this keeps the Xvfb server VM
+    // alive on slot 0 indefinitely and lets the host blit fbView() on its own
+    // rAF loop while clients come and go on slot 1. A single always-on proxy
+    // pump (setInterval) services the worker pthreads' proxied syscalls so the
+    // server keeps dispatching and the framebuffer keeps updating between
+    // launches. startXServer() spawns the server + pump and returns immediately;
+    // launchXClient() spawns a client and resolves when THAT client exits (the
+    // server keeps serving); stopX() clears the pump (VMs are reaped on the next
+    // sandbox teardown). The patched Xvfb publishes its framebuffer via 0x5fb,
+    // so fbInfo()/fbView() reflect the live X screen.
+    _xpump:null, _xserverH:null,
+    async startXServer(serverBytes, { argv=[], progname="/xserver" }={}){
+      if(this._xpump) throw new Error("blink-core: X server already running");
+      if(typeof Module._blinkenlib_run_thread_slot!=="function")
+        throw new Error("blink-core: blinkenlib_run_thread_slot missing (rebuild blink)");
+      const FS=Module.FS;
+      const writeProg=(p,bytes)=>{ const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); try{FS.unlink(p)}catch(_){} const fd=FS.open(p,"w+"); FS.write(fd,u8,0,u8.length,0); FS.close(fd); FS.chmod(p,0o755); };
+      writeProg(progname,serverBytes);
+      outBytes=[]; errBytes=[];
+      writeStr(prognamePtr,progname,1024);
+      writeArgv(argcPtr,(argv.length?["Xvfb",...argv]:["Xvfb"]),4096);
+      writeStr(argvPtr,"",4096);
+      this._xserverH=Module._blinkenlib_vm_spawn(0);
+      Module._blinkenlib_run_thread_slot(this._xserverH,0);
+      // Always-on proxy pump: the worker pthreads' blocking syscalls are proxied
+      // to the main thread; without continuous servicing the server stalls and
+      // the framebuffer never advances. 5ms keeps the X dispatch loop fed while
+      // leaving the main thread room for rAF blits/input.
+      const pump = typeof Module._emscripten_main_thread_process_queued_calls==="function"
+        ? () => { try{ Module._emscripten_main_thread_process_queued_calls() }catch(_){} }
+        : () => {};
+      this._xpump=setInterval(pump,5);
+      return this._xserverH;
+    },
+    // Launch a client against the running X server. Resolves with the client's
+    // exit code when it exits; the server keeps serving. Serialized on slot 1
+    // (one client at a time on this slot; sequential launches reuse it).
+    async launchXClient(clientBytes, { argv=[], progname="/xclient", timeoutMs=60000 }={}){
+      if(!this._xpump) throw new Error("blink-core: X server not running (call startXServer)");
+      const FS=Module.FS;
+      const writeProg=(p,bytes)=>{ const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); try{FS.unlink(p)}catch(_){} const fd=FS.open(p,"w+"); FS.write(fd,u8,0,u8.length,0); FS.close(fd); FS.chmod(p,0o755); };
+      writeProg(progname,clientBytes);
+      writeStr(prognamePtr,progname,1024);
+      writeArgv(argcPtr,[progname.split("/").pop(),...argv],4096);
+      writeStr(argvPtr,"",4096);
+      const clientH=Module._blinkenlib_vm_spawn(0);
+      Module._blinkenlib_run_thread_slot(clientH,1);
+      const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+      const t0=Date.now(); let timedOut=false;
+      while(!Module._blinkenlib_thread_done_slot(1)){
+        if(Date.now()-t0>timeoutMs){ timedOut=true; break; }
+        await sleep(20); // the always-on _xpump services the worker syscalls
+      }
+      const exitCode=Module._blinkenlib_thread_done_slot(1)?Module._blinkenlib_thread_status_slot(1):"RUNNING";
+      return { timedOut, exitCode, stdout:decode(outBytes), stderr:decode(errBytes) };
+    },
+    stopX(){ if(this._xpump){ clearInterval(this._xpump); this._xpump=null; } this._xserverH=null; },
+    xRunning(){ return !!this._xpump; },
     pushStdin(bytes){ for(const b of [...bytes].reverse()) stdinQueue.unshift(b) },
     async runShellScript(busyboxBytes, scriptText, { argv=[], progname="/program" }={}){
       const FS=Module.FS;
