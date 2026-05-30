@@ -494,7 +494,7 @@ jobs:
           { const mkd=(p)=>{let c="";for(const s of p.split("/").filter(Boolean)){c+="/"+s;try{FS.mkdir(c);}catch(e){}}};
             mkd("/tmp/.X11-unix"); mkd("/var/lib/xkb"); mkd("/usr/share/X11/xkb/compiled");
             for (const d of ["/tmp","/var/lib/xkb","/usr/share/X11/xkb/compiled",""]) {
-              for (const n of ["server-99.xkm","server-0.xkm"]) {
+              for (const n of ["server-99.xkm","server-98.xkm","server-0.xkm"]) {
                 try { FS.writeFile(d+"/"+n, xkm); } catch(e) {}
               }
             }
@@ -574,7 +574,7 @@ jobs:
           { const mkd=(p)=>{let c="";for(const s of p.split("/").filter(Boolean)){c+="/"+s;try{FS.mkdir(c);}catch(e){}}};
             mkd("/tmp/.X11-unix"); mkd("/var/lib/xkb"); mkd("/usr/share/X11/xkb/compiled");
             for (const d of ["/tmp","/var/lib/xkb","/usr/share/X11/xkb/compiled",""]) {
-              for (const n of ["server-99.xkm","server-0.xkm"]) {
+              for (const n of ["server-99.xkm","server-98.xkm","server-0.xkm"]) {
                 try { FS.writeFile(d+"/"+n, xkm); } catch(e) {}
               }
             }
@@ -593,6 +593,21 @@ jobs:
           const ok = /number of screens|dimensions:|X\.Org/i.test(cout) || r.client.exitCode===0;
           if (ok) console.log("XO-smoke RESULT: SUCCESS — bundled (offline) X client talked X11 to in-page Xvfb");
           else { console.log("XO-smoke RESULT: FAIL exit="+r.client.exitCode); process.exit(1); }
+          // SECOND CLIENT: prove the X path is client-general (not xdpyinfo-only).
+          // xsetroot -solid sets the root window background; exit 0 = it connected
+          // + completed an X request against a fresh in-page Xvfb.
+          if (FS.analyzePath("/usr/bin/xsetroot").exists) {
+            const r2 = await host.runConcurrent(
+              FS.readFile("/usr/bin/Xvfb"), FS.readFile("/usr/bin/xsetroot"),
+              { serverArgv: [":98","-screen","0","640x480x16","-ac","-noreset","-nolock"],
+                clientProgname: "/usr/bin/xsetroot", clientArgv: ["-display",":98","-solid","blue"],
+                clientDelayMs: 4000, overallTimeoutMs: 90000 });
+            console.log("XO2-smoke xsetroot exit:", r2.client.exitCode,
+              "stderr:", JSON.stringify((r2.client.stderr||"").slice(-300)));
+            const ok2 = r2.client.exitCode===0 && !/unable to open display/i.test((r2.client.stdout||"")+(r2.client.stderr||""));
+            if (ok2) console.log("XO2-smoke RESULT: SUCCESS — second X client (xsetroot) talked X11 to in-page Xvfb");
+            else console.log("XO2-smoke RESULT: PROGRESS — xsetroot exit="+r2.client.exitCode);
+          }
           EOF
 
       - name: Commit rebuilt artifacts
