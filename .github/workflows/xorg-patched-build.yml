@@ -82,6 +82,49 @@ jobs:
           PY
           grep -n "no fork available" "$F"
 
+      - name: Patch hw/vfb/InitOutput.c — publish the vfb framebuffer via syscall 0x5fb
+        run: |
+          set -eux
+          # Stock Xvfb renders into its own malloc/shmem screen buffer and never
+          # tells the host where it is. blink exposes a synthetic syscall 0x5fb
+          # (blinkenlib_fb_register: vaddr,width,height,stride) that the JS host
+          # reads zero-copy to blit a guest framebuffer to a canvas. We hook the
+          # EXISTING vfbBlockHandler (called every dispatch cycle, after the screen
+          # is painted) and publish each screen's pfbMemory via 0x5fb so the in-page
+          # desktop can show live X windows. No-op off blink (syscall returns
+          # -1/ENOSYS). python rewrite for robustness against whitespace.
+          F=xsrc/hw/vfb/InitOutput.c
+          test -f "$F"
+          python3 - "$F" <<'PY'
+          import sys
+          p = sys.argv[1]
+          s = open(p).read()
+          # 1) Ensure syscall() is reachable.
+          if "#include <sys/syscall.h>" not in s:
+              anchor = s.index("#include")
+              s = s[:anchor] + "#include <sys/syscall.h>\n#include <unistd.h>\n" + s[anchor:]
+          # 2) Inject the fb-publish into vfbBlockHandler's per-screen loop. The body
+          #    is:  for (i = 0; i < vfbNumScreens; i++) {  #ifdef MS_ASYNC ...
+          #    Insert our register right after the loop's opening brace so it fires
+          #    for every screen on every block cycle, regardless of MS_ASYNC.
+          marker = "vfbBlockHandler(void *blockData, void *timeout)"
+          fn = s.index(marker)
+          loop = s.index("for (i = 0; i < vfbNumScreens; i++) {", fn)
+          brace = s.index("{", loop) + 1
+          pub = ("\n"
+                 "        /* blink/wasm: publish this screen's framebuffer to the JS\n"
+                 "           host so the in-page desktop can blit live X windows. */\n"
+                 "        if (vfbScreens[i].pfbMemory)\n"
+                 "            syscall(0x5fb, (long) vfbScreens[i].pfbMemory,\n"
+                 "                    (long) vfbScreens[i].width,\n"
+                 "                    (long) vfbScreens[i].height,\n"
+                 "                    (long) vfbScreens[i].paddedBytesWidth, 0L, 0L);\n")
+          s = s[:brace] + pub + s[brace:]
+          open(p, "w").write(s)
+          print("patched vfb fb-register into vfbBlockHandler")
+          PY
+          grep -n "0x5fb\|sys/syscall.h" "$F" | head
+
       - name: Configure (GL-less) + build Xvfb
         run: |
           set -eux
