@@ -537,8 +537,8 @@ jobs:
           FS.writeFile("/x-client-overlay.tar", zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz")));
           const ex = await host.runElf(FS.readFile("/bin/busybox"), { argv:["tar","-xvf","/x-client-overlay.tar","-C","/"], path:"/bin/busybox" });
           console.log("XO-smoke overlay extract:", ex.exitCode,
-            "out=", JSON.stringify(((ex.stdout||"").slice(0,300))),
-            "err=", JSON.stringify(((ex.stderr||"").slice(0,300))));
+            "out=", JSON.stringify(((ex.stdout||"").slice(0,1200))),
+            "err=", JSON.stringify(((ex.stderr||"").slice(0,600))));
           console.log("XO-smoke fs check xdpyinfo:", FS.analyzePath("/usr/bin/xdpyinfo").exists,
             "libX11:", FS.analyzePath("/usr/lib/libX11.so.6").exists,
             "ldmusl:", FS.analyzePath("/lib/ld-musl-x86_64.so.1").exists);

@@ -151,7 +151,10 @@ jobs:
           # remain (xdpyinfo/xsetroot + their .so closure + ld-musl).
           tops="$(cd "$ROOT" && ls -1)"
           echo "overlay top dirs: $tops"
-          ( cd "$ROOT" && tar czf - $tops ) > containers/x-client-overlay.tar.gz
+          # -h dereferences symlinks (store the real file under the link's name),
+          # so the guest's busybox tar never has to create a symlink (which can
+          # abort extraction). Slightly larger tarball, but robust in-page.
+          ( cd "$ROOT" && tar czhf - $tops ) > containers/x-client-overlay.tar.gz
           echo "overlay key files:"; tar tzf containers/x-client-overlay.tar.gz | grep -iE "bin/xdpyinfo|bin/xsetroot|ld-musl|libX11\.|libxcb\." | head
           ls -la containers/x-client-overlay.tar.gz
 
