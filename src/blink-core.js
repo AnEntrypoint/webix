@@ -87,6 +87,11 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   const decode=(arr)=>td.decode(new Uint8Array(arr));
   let exitDeferred=null;
   let lastLoaded=null;
+  // True once the synchronous main-thread _blinkenlib_run() path has been used.
+  // The 2nd main-thread run wedges in-browser (setupProgram/InitBus re-init
+  // aborts), so after the first run we route runElf through a re-entrant worker
+  // slot. See runElf's RE-ENTRANCY note.
+  let mainThreadRunUsed=false;
   const preloaded=new Map();
   const stdinQueue=options.stdinBytes?[...options.stdinBytes].reverse():[];
   let exited=false;
@@ -327,6 +332,50 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       writeArgv(argcPtr, argv.length?argv:[progname], 4096);
       writeStr(argvPtr,"",4096);
       outBytes=[]; errBytes=[]; lastSignal=null; lastExitCode=null;
+
+      // RE-ENTRANCY: the main-thread _blinkenlib_run() path runs setupProgram +
+      // InitBus on every call; in-browser the SECOND such call wedges (its
+      // TearDown/InitBus re-init aborts), so every render-once app and every
+      // sequential runCommand froze after the first exec (witnessed: 2nd
+      // /xappdemo timed out, exitDeferred never resolved). The thread-slot path
+      // (vm_spawn -> run_thread_slot -> poll thread_done_slot, pumping the proxy
+      // queue) is proven re-entrant in-browser (runConcurrent / launchXClient
+      // reuse it across launches). So once a main-thread run has happened, route
+      // every subsequent runElf through a dedicated worker slot. The very first
+      // run keeps the fast synchronous main-thread path; node (no pthread build)
+      // always uses it (libuv re-enters cleanly there).
+      const threaded =
+        mainThreadRunUsed &&
+        typeof Module._blinkenlib_vm_spawn === "function" &&
+        typeof Module._blinkenlib_run_thread_slot === "function" &&
+        typeof Module._blinkenlib_thread_done_slot === "function" &&
+        typeof Module._blinkenlib_thread_status_slot === "function";
+
+      if(threaded){
+        // Dedicated re-entrant slot (2) for foreground runElf, kept clear of the
+        // X server (slot 0) and X client (slot 1) so a live X session and a
+        // render-once GUI frame can coexist.
+        const RUNELF_SLOT = 2;
+        const h = Module._blinkenlib_vm_spawn(0);
+        Module._blinkenlib_run_thread_slot(h, RUNELF_SLOT);
+        const pumpProxy = typeof Module._emscripten_main_thread_process_queued_calls === "function"
+          ? () => { try { Module._emscripten_main_thread_process_queued_calls(); } catch(_){} }
+          : () => {};
+        const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+        const t0=Date.now();
+        while(!Module._blinkenlib_thread_done_slot(RUNELF_SLOT)){
+          if(Date.now()-t0>120000) break; // safety bound; render-once frames are ms-scale
+          pumpProxy();
+          await sleep(4);
+        }
+        const exitCode=Module._blinkenlib_thread_done_slot(RUNELF_SLOT)
+          ? Module._blinkenlib_thread_status_slot(RUNELF_SLOT) : "RUNNING";
+        lastExitCode=exitCode;
+        return { exitCode, stdout:decode(outBytes), stderr:decode(errBytes), signal:lastSignal };
+      }
+
+      // First run (or non-pthread build): fast synchronous main-thread path.
+      mainThreadRunUsed = true;
       const done=new Promise((resolve,reject)=>{ exitDeferred={resolve,reject} });
       Module._blinkenlib_run();
       const exitCode=await done;
