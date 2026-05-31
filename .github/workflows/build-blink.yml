@@ -57,7 +57,7 @@ jobs:
           # branch so the JS host can map the guest framebuffer zero-copy.
           # (They are EMSCRIPTEN_KEEPALIVE too, but listing them here is robust
           # against dead-code elimination at -O levels.)
-          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_blinkenlib_push_input","_blinkenlib_input_pending","_blinkenlib_vm_current","_blinkenlib_vm_set","_blinkenlib_vm_spawn","_blinkenlib_continue","_blinkenlib_run_thread","_blinkenlib_run_thread_slot","_blinkenlib_thread_done","_blinkenlib_thread_status","_blinkenlib_thread_done_slot","_blinkenlib_thread_status_slot","_emscripten_main_thread_process_queued_calls","_main"'
+          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_fb_spy_address","_blinkenlib_spy_address","_blinkenlib_push_input","_blinkenlib_input_pending","_blinkenlib_vm_current","_blinkenlib_vm_set","_blinkenlib_vm_spawn","_blinkenlib_continue","_blinkenlib_run_thread","_blinkenlib_run_thread_slot","_blinkenlib_thread_done","_blinkenlib_thread_status","_blinkenlib_thread_done_slot","_blinkenlib_thread_status_slot","_emscripten_main_thread_process_queued_calls","_main"'
           # Pthreads are required for Blink's fork()/clone()/futex emulation and
           # for real guest threads (emscripten implements fork via web workers +
           # SharedArrayBuffer). Without -pthread the configure probe reports
@@ -649,7 +649,7 @@ jobs:
         working-directory: libblink
         run: |
           EXPORTS='"UTF8ToString","stringToNewUTF8","AsciiToString","FS","callMain","addFunction","wasmExports"'
-          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_spy_address","_blinkenlib_push_input","_blinkenlib_input_pending","_main"'
+          FUNCS='"_blinkenlib_get_fb_vaddr","_blinkenlib_get_fb_width","_blinkenlib_get_fb_height","_blinkenlib_get_fb_stride","_blinkenlib_get_fb_generation","_blinkenlib_get_fb_ptr","_blinkenlib_fb_spy_address","_blinkenlib_spy_address","_blinkenlib_push_input","_blinkenlib_input_pending","_main"'
           # NO -pthread, NO shared memory -> a normal growable ArrayBuffer that can
           # actually grow to MAXIMUM_MEMORY=4GB without the threaded growMemory abort.
           EFLAGS="-sENVIRONMENT=node,web,worker -sALLOW_MEMORY_GROWTH=1 -sABORTING_MALLOC=0 -sMAXIMUM_MEMORY=4294967296 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 -lnodefs.js"

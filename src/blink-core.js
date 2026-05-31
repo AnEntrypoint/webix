@@ -212,9 +212,20 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
     const len=info.stride*info.height;
     if(!fbCopyBuf||fbCopyBuf.length!==len) fbCopyBuf=new Uint8ClampedArray(len);
     const PAGE=4096;
+    // The framebuffer belongs to the VM that registered it (the X server runs
+    // on its own pthread). spy_address resolves against the CALLER thread's
+    // _Thread_local machine, which on the host's main-thread blit is a
+    // different/null VM -> returns 0 and the fb reads all-zero under a live X
+    // server. fb_spy_address resolves against the registering machine
+    // (fb_machine, captured at fb_register), so a worker-VM framebuffer is
+    // readable from the main thread. Prefer it; fall back to spy_address for an
+    // older wasm that predates the cross-VM fix (single-VM apps still resolve).
+    const spy = typeof Module._blinkenlib_fb_spy_address==="function"
+      ? (v)=>Module._blinkenlib_fb_spy_address(v)
+      : (v)=>Module._blinkenlib_spy_address(v);
     let off=0;
     while(off<len){
-      const host=Module._blinkenlib_spy_address(base+off);
+      const host=spy(base+off);
       const chunk=Math.min(PAGE-((base+off)&(PAGE-1)), len-off);
       if(host){
         const src=new Uint8Array(memBuffer(Module), host, chunk);
