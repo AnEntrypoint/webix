@@ -439,3 +439,5 @@ then commit. `COMPONENT_API.md` in that repo documents the real contracts
   </span><span class=copy>copy</span></div>` — the `.copy` is a static span.
   To make copy work, wrap `Install` in a div with `onclick` that checks
   `e.target.closest('.copy')` and copies/sets state yourself.
+
+@.gm/next-step.md

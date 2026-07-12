@@ -33,3 +33,4 @@ docs/assets/*
 !docs/assets/247420.css
 .gm/browser-profile/
 .gm/browser-profile-*/
+.gm/pw-sock-*/
