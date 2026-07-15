@@ -4,14 +4,18 @@
 
 const ASSETS = new URL('./', import.meta.url).href;
 
-let busyboxBytes = null;
+let busyboxHandle = null;
 let queue = Promise.resolve();
 
-async function loadBusybox(){
-  if (busyboxBytes) return busyboxBytes;
+// Preload busybox into the host FS once via preloadFile, then reuse the handle
+// across every command — blink-core skips the ~1MB FS rewrite when the same
+// handle is already sitting at /program (see runElf's lastLoaded check).
+async function loadBusybox(x){
+  if (busyboxHandle && x.host.isPreloaded?.(busyboxHandle)) return busyboxHandle;
   const r = await fetch(ASSETS + 'busybox-x86_64.elf');
-  busyboxBytes = new Uint8Array(await r.arrayBuffer());
-  return busyboxBytes;
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  busyboxHandle = x.host.preloadFile('busybox', bytes);
+  return busyboxHandle;
 }
 
 function tokenize(line){
@@ -43,6 +47,9 @@ export function createCli({ onLine, onStatus }){
   let pending = '';
 
   async function execApk(x, tokens){
+    // apk may still be lazy-mounting in the background (lazyRootfs mode) --
+    // wait for it once rather than reporting a false "unavailable".
+    if (!x.apk && x.apkReady) await x.apkReady;
     if (!x.apk) return { stdout:'', stderr:'apk unavailable: rootfs not mounted', exitCode:1 };
     const sub = tokens[0];
     try {
@@ -92,10 +99,10 @@ export function createCli({ onLine, onStatus }){
     const userTokens = tokenize(trimmed);
     if (userTokens[0] === 'apk') return execApk(x, userTokens.slice(1));
     const argv = ['./busybox', ...userTokens];
-    const bytes = await loadBusybox();
+    const handle = await loadBusybox(x);
 
     onStatus?.('running');
-    const r = await x.runElf(bytes, { argv });
+    const r = await x.runElf(null, { argv, path: handle });
     onStatus?.('ready');
     const clean = stripBanner(r.stdout, argv);
     return { stdout: clean, stderr: r.stderr, exitCode: r.exitCode, argv };

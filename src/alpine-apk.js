@@ -58,33 +58,66 @@ export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"
 
   const repo=makeRepo({ fetchImpl, ...(repoOpts||{}) });
 
-  // Install a package by name (or provide-token) from the live Alpine repo,
-  // resolving its dependency closure. so:/cmd:/pc: deps not present as packages
-  // are assumed satisfied by the mounted base rootfs (musl, busybox) and skipped.
-  async function addByName(name, { _seen=new Set() }={}){
+  // Phase 1 (pure index work, no .apk fetches): resolve the full dependency
+  // closure for `name` into an ordered list of package names to install,
+  // dependencies before dependents. `seen` is shared across the whole
+  // recursion (not per-branch) so a package reachable via two different
+  // dependency paths is only queued once even when both paths are still
+  // being resolved concurrently -- resolve() calls themselves don't mutate
+  // shared state, only this Set does, so concurrent recursion is safe.
+  async function resolveClosure(name, seen, order){
     const pkgName=await repo.resolve(name);
-    if(!pkgName){
-      throw new Error(`apk: '${name}' not found in alpine v3.21 main/community`);
+    if(!pkgName) throw new Error(`apk: '${name}' not found in alpine v3.21 main/community`);
+    if(installed.has(pkgName) || seen.has(pkgName)) return pkgName;
+    seen.add(pkgName); // claim before recursing: concurrent dep branches sharing this pkg see it claimed immediately
+    const meta=await repo.apkUrl(pkgName);
+    if(!meta) throw new Error(`apk: '${pkgName}' has no .apk in the index`);
+    const depPkgs=(await Promise.all(meta.depends.map(async dep=>{
+      const key=depKey(dep);
+      if(!key) return null; // conflict (!pkg)
+      const depPkg=await repo.resolve(dep);
+      if(!depPkg) return null; // so:/cmd:/pc: with no package -> assumed satisfied by base rootfs
+      return depPkg;
+    }))).filter(Boolean);
+    await Promise.all(depPkgs.map(dep=>resolveClosure(dep, seen, order)));
+    order.push({ name:pkgName, url:meta.url, version:meta.version });
+    return pkgName;
+  }
+
+  // Bounded-concurrency map: run `fn` over `items` with at most `limit` in
+  // flight at once, preserving each item's own result position.
+  async function mapLimit(items, limit, fn){
+    const out=new Array(items.length);
+    let next=0;
+    async function worker(){
+      while(next<items.length){
+        const i=next++; out[i]=await fn(items[i], i);
+      }
     }
-    if(installed.has(pkgName)){
+    await Promise.all(Array.from({length:Math.min(limit,items.length)}, worker));
+    return out;
+  }
+
+  // Install a package by name (or provide-token) from the live Alpine repo.
+  // Phase 1 resolves the whole dependency closure (pure index work, already
+  // parallelized inside resolveClosure); phase 2 fetches every .apk with
+  // bounded concurrency (default 4) instead of one dependency at a time;
+  // phase 3 extracts each in closure order (deps before dependents).
+  async function addByName(name, { concurrency=4 }={}){
+    const pkgName=await repo.resolve(name);
+    if(pkgName && installed.has(pkgName)){
       const p=installed.get(pkgName);
       return { name:pkgName, version:p.version, files:p.files, alreadyInstalled:true };
     }
-    if(_seen.has(pkgName)) return null; // cycle guard
-    _seen.add(pkgName);
-    const meta=await repo.apkUrl(pkgName);
-    if(!meta) throw new Error(`apk: '${pkgName}' has no .apk in the index`);
-    for(const dep of meta.depends){
-      const key=depKey(dep);
-      if(!key) continue; // conflict (!pkg)
-      const depPkg=await repo.resolve(dep);
-      if(depPkg && installed.has(depPkg)) continue;
-      if(!depPkg){ if(/^(so|cmd|pc):/.test(dep)) continue; else continue; } // base rootfs
-      await addByName(depPkg, { _seen });
+    const order=[];
+    await resolveClosure(name, new Set(), order);
+    const fetched=await mapLimit(order, concurrency, async pkg=>({ pkg, bytes:await corsFetch(pkg.url, { fetchImpl, ...(repoOpts||{}) }) }));
+    let result=null;
+    for(const { pkg, bytes } of fetched){
+      const r=await addBytes(bytes);
+      if(pkg.name===order[order.length-1].name) result={ ...r, url:pkg.url };
     }
-    const bytes=await corsFetch(meta.url, { fetchImpl, ...(repoOpts||{}) });
-    const r=await addBytes(bytes);
-    return { ...r, url:meta.url };
+    return result;
   }
 
   // Remove an installed package: unlink its files from the guest FS + drop the

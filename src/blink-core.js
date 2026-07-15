@@ -1,84 +1,10 @@
-const BLINK_PREEMPT=40, BLINK_FAKE_TTY=42, SIGTRAP=5;
-
-const REGS=["rip","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15","rax","rbx","rcx","rdx"];
-
-function mkdirp(FS,p){
-  let cur="";
-  for(const seg of p.split("/").filter(Boolean)){
-    cur+="/"+seg;
-    try{ FS.mkdir(cur,0o755) }catch(_){}
-  }
-}
-
-function extractTarToFS(FS, tarBytes, onError){
-  const u8 = tarBytes instanceof Uint8Array ? tarBytes : new Uint8Array(tarBytes);
-  const td=new TextDecoder();
-  let p=0;
-  while(p+512<=u8.length){
-    const name=td.decode(u8.subarray(p,p+100)).replace(/\0.*/,"");
-    if(!name){ p+=512; continue }
-    const sizeStr=td.decode(u8.subarray(p+124,p+136)).replace(/[\0\s]/g,"");
-    const size=parseInt(sizeStr||"0",8)||0;
-    const tf=String.fromCharCode(u8[p+156]||0x30);
-    const linkname=td.decode(u8.subarray(p+157,p+257)).replace(/\0.*/,"");
-    const full="/"+name.replace(/^\.\//,"");
-    try{
-      if(tf==="5") mkdirp(FS,full);
-      else if(tf==="2"){ mkdirp(FS,full.replace(/\/[^/]*$/,"")); try{FS.unlink(full)}catch(_){}; FS.symlink(linkname,full) }
-      else if(tf==="0"||tf===""||tf===" "){
-        mkdirp(FS,full.replace(/\/[^/]*$/,""));
-        const data=u8.subarray(p+512,p+512+size);
-        try{FS.unlink(full)}catch(_){}
-        const s=FS.open(full,"w+");
-        if(size) FS.write(s,data,0,size,0);
-        FS.close(s); FS.chmod(full,0o755);
-      }
-    }catch(e){ (onError||((m,err)=>console.warn("tar:",m,err.message)))(full,e) }
-    p+=512+Math.ceil(size/512)*512;
-  }
-}
-
-// Return the live WASM linear-memory ArrayBuffer. Under -pthread the memory is
-// IMPORTED + shared (--import-memory --shared-memory), so it is NOT an export:
-// wasmExports.memory is undefined and only Module.wasmMemory / the HEAP views
-// point at it. HEAPU8.buffer is the most portable + always-current handle
-// (emscripten re-points the HEAP* views on every growth), so prefer it; fall
-// back to wasmMemory then the (single-thread-only) wasmExports.memory.
-function memBuffer(Module){
-  const b = Module.HEAPU8?.buffer || Module.wasmMemory?.buffer || Module.wasmExports?.memory?.buffer;
-  if(!b) throw new Error("blink-core: cannot locate WASM memory buffer");
-  return b;
-}
-
-function makeRegisterAccessor(Module, clstruct){
-  const dv=()=>new DataView(memBuffer(Module));
-  const off=(i)=>dv().getUint32(clstruct+i*4,true);
-  return {
-    snapshot(){
-      const memBuf=memBuffer(Module);
-      const memCopy=new Uint8Array(memBuf.byteLength);
-      memCopy.set(new Uint8Array(memBuf));
-      const v=dv();
-      const regs={ flags:v.getUint32(off(7),true) };
-      REGS.forEach((n,i)=>{ regs[n]=v.getBigUint64(off(9+i),true) });
-      return { memory:memCopy, registers:regs };
-    },
-    restore(snap){
-      const memBuf=memBuffer(Module);
-      if(snap.memory.byteLength>memBuf.byteLength) throw new Error("snapshot memory larger than current");
-      new Uint8Array(memBuf).set(snap.memory);
-      const v=dv();
-      REGS.forEach((n,i)=>{ v.setBigUint64(off(9+i),snap.registers[n],true) });
-      v.setUint32(off(7),snap.registers.flags,true);
-    },
-    readRegisters(){
-      const v=dv();
-      const r={ flags:v.getUint32(off(7),true) };
-      REGS.forEach((n,i)=>{ r[n]=v.getBigUint64(off(9+i),true) });
-      return r;
-    }
-  };
-}
+import {
+  waitForSlot, bootBlinkModule,
+  extractTarToFS, makeRegisterAccessor, writeStr as writeStrRaw, writeArgv as writeArgvRaw
+} from "./blink-core-helpers.js";
+import { createFbAccessors } from "./blink-core-fb.js";
+import { createXRunner } from "./blink-core-x.js";
+import { mkdirp } from "./apk-format.js";
 
 export async function createBlinkCore({ wasmBinary, factory, options={} }){
   // byte-buffered stdout/stderr: per-char String concat was O(n^2) for large output.
@@ -94,172 +20,32 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
   let mainThreadRunUsed=false;
   const preloaded=new Map();
   const stdinQueue=options.stdinBytes?[...options.stdinBytes].reverse():[];
-  let exited=false;
-  function settleExit(code){
-    exited=true;
-    lastExitCode=code;
-    if(exitDeferred){ const d=exitDeferred; exitDeferred=null; d.resolve(code) }
-  }
-  const factoryArgs={
-    noInitialRun:true,
-    preRun:(M)=>{
-      M.FS.init(
-        ()=>stdinQueue.length?stdinQueue.pop():null,
-        (c)=>{ if(c!==null){ outBytes.push(c); options.onStdout?.(c) } },
-        (c)=>{ if(c!==null){ errBytes.push(c); options.onStderr?.(c) } }
-      );
-    }
-  };
-  // Either supply raw bytes (Node/tests) or an instantiateWasm streaming hook (browser).
-  if(options.instantiateWasm) factoryArgs.instantiateWasm=options.instantiateWasm;
-  else factoryArgs.wasmBinary=wasmBinary;
-  const Module=await factory(factoryArgs);
-  // Under -pthread the memory is imported + shared, so it lives on
-  // Module.wasmMemory / the HEAP views, NOT on wasmExports.memory (which is
-  // undefined for an imported memory). The MODULARIZE factory also resolves
-  // once the main-thread runtime is up; wait until a memory buffer is reachable
-  // through any of the portable handles before touching it.
-  if(!Module.HEAPU8 && !Module.wasmMemory && !Module.wasmExports?.memory){
-    if(typeof Module.ready?.then==="function"){ try{ await Module.ready }catch(_){} }
-    for(let i=0;i<2000 && !(Module.HEAPU8||Module.wasmMemory||Module.wasmExports?.memory);i++){
-      await new Promise(r=>setTimeout(r,0));
-    }
-  }
-  // memBuffer throws a clear error if no handle resolved; probe it once now.
-  memBuffer(Module);
-  // Trampoline the cooperative-preemption resume off the signal callback's
-  // stack. The guest raises SIGTRAP/PREEMPT every MAX_CYCLES; calling
-  // _blinkenlib_preempt_resume() synchronously from inside signalCb re-enters
-  // the guest WITHOUT unwinding, so each slice nests another invoke_viii frame
-  // and a forever-running guest (e.g. the X server) overflows the JS call stack
-  // after ~thousands of slices. Instead, return from signalCb (leaving the guest
-  // paused) and schedule the resume on a fresh stack via setTimeout(0), which
-  // also lets the JS event loop (rAF/blits/input) breathe between slices.
-  const resumeSoon=()=>{ if(exited) return; setTimeout(()=>{ if(!exited){ try{ Module._blinkenlib_preempt_resume() }catch(e){ settleExit(255) } } },0); };
-  // The signal/exit callbacks delegate to a swappable handler so the run model
-  // can be a single foreground run (default) OR a cooperative multi-VM scheduler
-  // (runConcurrent) where a per-call flag records preempt/exit for the VM that
-  // was active when callMain/resume was invoked.
-  let activeHandler=null;
-  const signalCb=Module.addFunction((sig,code)=>{
-    if(activeHandler){ activeHandler.onSignal(sig,code); return }
-    if(sig!==SIGTRAP){ lastSignal={sig,code}; settleExit(128+sig); return }
-    if(code===BLINK_PREEMPT) resumeSoon();
-    else if(code===BLINK_FAKE_TTY){ if(options.onTtyPause) options.onTtyPause(); else Module._blinkenlib_faketty_resume() }
-  },"vii");
-  const exitCb=Module.addFunction((code)=>{ if(activeHandler){ activeHandler.onExit(code); return } settleExit(code) },"vi");
-  Module.callMain([signalCb.toString(), exitCb.toString()]);
+  // Boot the wasm module + wire signal/exit callbacks (see blink-core-helpers.js
+  // bootBlinkModule): onSettle resolves exitDeferred, onSignal records a fault.
+  const { Module } = await bootBlinkModule({
+    wasmBinary, factory, options,
+    io:{
+      stdinQueue,
+      pushOut:(c)=>outBytes.push(c),
+      pushErr:(c)=>errBytes.push(c),
+    },
+    onSettle(code){
+      lastExitCode=code;
+      if(exitDeferred){ const d=exitDeferred; exitDeferred=null; d.resolve(code) }
+    },
+    onSignal(sig){ lastSignal=sig; },
+  });
   const clstruct=Module._blinkenlib_get_clstruct();
   const argcPtr=Module._blinkenlib_get_argc_string();
   const argvPtr=Module._blinkenlib_get_argv_string();
   const prognamePtr=Module._blinkenlib_get_progname_string();
   const regs=makeRegisterAccessor(Module, clstruct);
-  function writeStr(ptr,str,max){
-    const view=new DataView(memBuffer(Module));
-    const n=Math.min(str.length,max-1);
-    for(let i=0;i<n;i++) view.setUint8(ptr+i,str.charCodeAt(i));
-    view.setUint8(ptr+n,0);
-  }
-  // Write an argv array as a NUL-separated buffer terminated by a double NUL.
-  // Matches stringToArgsArray() in blinkenlib.c, which splits on NUL so that
-  // arguments containing spaces survive (the old space-joined scheme broke
-  // every multi-word arg). ARGC_MAX_LINE_LEN is 4096 in the patched build.
-  function writeArgv(ptr,args,max){
-    const enc=new TextEncoder();
-    const view=new Uint8Array(memBuffer(Module));
-    let off=0;
-    for(const a of args){
-      const bytes=enc.encode(String(a));
-      if(off+bytes.length+2>max) break; // leave room for two NULs
-      view.set(bytes,ptr+off); off+=bytes.length;
-      view[ptr+off]=0; off++;
-    }
-    view[ptr+off]=0; // terminating empty arg
-  }
+  const writeStr=(ptr,str,max)=>writeStrRaw(Module,ptr,str,max);
+  const writeArgv=(ptr,args,max)=>writeArgvRaw(Module,ptr,args,max);
   // Framebuffer accessors: geometry published by the guest via the synthetic
-  // 0x5fb syscall, pixels mapped zero-copy through spy_address(fb_vaddr).
-  function fbInfo(){
-    const w=Module._blinkenlib_get_fb_width();
-    const h=Module._blinkenlib_get_fb_height();
-    if(!w||!h) return null;
-    return {
-      vaddr:Module._blinkenlib_get_fb_vaddr(),
-      width:w, height:h,
-      stride:Module._blinkenlib_get_fb_stride(),
-      generation:Module._blinkenlib_get_fb_generation(),
-    };
-  }
-  // Reusable output buffer for the page-assembled framebuffer copy.
-  let fbCopyBuf=null;
-  // Separate output buffer for the RGB565 -> RGBA expansion (16bpp guests).
-  let fbRgbaBuf=null;
-  // Return the guest framebuffer pixels as a contiguous Uint8ClampedArray.
-  //
-  // IMPORTANT: blink's SpyAddress (memory.c LookupAddress2) returns a host
-  // pointer valid only for the 4096-byte PAGE containing the queried vaddr --
-  // guest pages map to arbitrary, non-contiguous host pages. A single
-  // spy_address(fb_vaddr) is therefore valid for just the first 4KB; reading
-  // stride*height contiguously past that returns unrelated host memory (this
-  // was the "framebuffer goes black past the first page" bug). So we COPY the
-  // framebuffer page-by-page: for each 4KB span we re-query spy_address to get
-  // that page's host pointer and copy it into a contiguous output buffer.
-  function fbView(){
-    const info=fbInfo(); if(!info) return null;
-    const vaddr=Module._blinkenlib_get_fb_vaddr(); // u64; may arrive signed
-    // normalize a possibly-signed 32-bit marshalled vaddr to unsigned
-    const base=vaddr<0?vaddr>>>0:vaddr;
-    if(!base) return null;
-    const len=info.stride*info.height;
-    if(!fbCopyBuf||fbCopyBuf.length!==len) fbCopyBuf=new Uint8ClampedArray(len);
-    const PAGE=4096;
-    // The framebuffer belongs to the VM that registered it (the X server runs
-    // on its own pthread). spy_address resolves against the CALLER thread's
-    // _Thread_local machine, which on the host's main-thread blit is a
-    // different/null VM -> returns 0 and the fb reads all-zero under a live X
-    // server. fb_spy_address resolves against the registering machine
-    // (fb_machine, captured at fb_register), so a worker-VM framebuffer is
-    // readable from the main thread. Prefer it; fall back to spy_address for an
-    // older wasm that predates the cross-VM fix (single-VM apps still resolve).
-    const spy = typeof Module._blinkenlib_fb_spy_address==="function"
-      ? (v)=>Module._blinkenlib_fb_spy_address(v)
-      : (v)=>Module._blinkenlib_spy_address(v);
-    let off=0;
-    while(off<len){
-      const host=spy(base+off);
-      const chunk=Math.min(PAGE-((base+off)&(PAGE-1)), len-off);
-      if(host){
-        const src=new Uint8Array(memBuffer(Module), host, chunk);
-        fbCopyBuf.set(src, off);
-      } // unmapped page -> leave as-is (transparent/previous)
-      off+=chunk;
-    }
-    // The canvas blit path expects 4-byte RGBA. A 32bpp guest framebuffer
-    // (stride == width*4) is already in that layout (BGRX/RGBX) and returned as
-    // is. A 16bpp framebuffer (stride == width*2, e.g. Xvfb -screen WxHx16 =
-    // RGB565) must be expanded to RGBA or it renders as garbage. Detect by
-    // bytes-per-pixel and expand RGB565 -> RGBA into a separate output buffer.
-    const bpp=info.width>0?info.stride/info.width:4;
-    if(bpp===2){
-      const w=info.width, h=info.height, n=w*h;
-      if(!fbRgbaBuf||fbRgbaBuf.length!==n*4) fbRgbaBuf=new Uint8ClampedArray(n*4);
-      // fbCopyBuf holds RGB565 little-endian; row stride may exceed w*2 (padding).
-      for(let y=0;y<h;y++){
-        let si=y*info.stride, di=y*w*4;
-        for(let x=0;x<w;x++,si+=2,di+=4){
-          const lo=fbCopyBuf[si], hi=fbCopyBuf[si+1];
-          const v=lo|(hi<<8);
-          // RGB565 -> 8-bit per channel (scale 5/6/5 bits to 0..255)
-          const r=(v>>11)&0x1f, g=(v>>5)&0x3f, b=v&0x1f;
-          fbRgbaBuf[di]=(r*527+23)>>6;     // r5 -> r8
-          fbRgbaBuf[di+1]=(g*259+33)>>6;   // g6 -> g8
-          fbRgbaBuf[di+2]=(b*527+23)>>6;   // b5 -> b8
-          fbRgbaBuf[di+3]=255;
-        }
-      }
-      return { ...info, width:w, height:h, stride:w*4, bpp:4, pixels:fbRgbaBuf };
-    }
-    return { ...info, bpp, pixels:fbCopyBuf };
-  }
+  // 0x5fb syscall, pixels mapped zero-copy through spy_address(fb_vaddr),
+  // page-pointer-cached (see blink-core-fb.js).
+  const { fbInfo, fbView } = createFbAccessors(Module);
   // Host -> guest input. Maps display.js's event shape to the C input device
   // (blinkenlib_push_input(type, code, x, y, value)). type: 1=key 2=motion
   // 3=button. Guest drains via syscall 0x5fc. No-op (with a guard) if the
@@ -350,8 +136,8 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       // sequential runCommand froze after the first exec (witnessed: 2nd
       // /xappdemo timed out, exitDeferred never resolved). The thread-slot path
       // (vm_spawn -> run_thread_slot -> poll thread_done_slot, pumping the proxy
-      // queue) is proven re-entrant in-browser (runConcurrent / launchXClient
-      // reuse it across launches). So once a main-thread run has happened, route
+      // queue) is proven re-entrant in-browser (launchXClient reuses it across
+      // launches). So once a main-thread run has happened, route
       // every subsequent runElf through a dedicated worker slot. The very first
       // run keeps the fast synchronous main-thread path; node (no pthread build)
       // always uses it (libuv re-enters cleanly there).
@@ -369,18 +155,8 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
         const RUNELF_SLOT = 2;
         const h = Module._blinkenlib_vm_spawn(0);
         Module._blinkenlib_run_thread_slot(h, RUNELF_SLOT);
-        const pumpProxy = typeof Module._emscripten_main_thread_process_queued_calls === "function"
-          ? () => { try { Module._emscripten_main_thread_process_queued_calls(); } catch(_){} }
-          : () => {};
-        const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
-        const t0=Date.now();
-        while(!Module._blinkenlib_thread_done_slot(RUNELF_SLOT)){
-          if(Date.now()-t0>120000) break; // safety bound; render-once frames are ms-scale
-          pumpProxy();
-          await sleep(4);
-        }
-        const exitCode=Module._blinkenlib_thread_done_slot(RUNELF_SLOT)
-          ? Module._blinkenlib_thread_status_slot(RUNELF_SLOT) : "RUNNING";
+        // render-once frames settle in ms; poll tight (4ms) with a 120s safety bound.
+        const { exitCode } = await waitForSlot(Module, RUNELF_SLOT, { timeoutMs:120000, pollMs:4 });
         lastExitCode=exitCode;
         return { exitCode, stdout:decode(outBytes), stderr:decode(errBytes), signal:lastSignal };
       }
@@ -392,143 +168,12 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       const exitCode=await done;
       return { exitCode, stdout:decode(outBytes), stderr:decode(errBytes), signal:lastSignal };
     },
-    // Run a long-lived SERVER guest and a CLIENT guest concurrently in this one
-    // wasm instance so they share the MEMFS + in-process AF_UNIX sockets (X
-    // server + X client). Cooperative: each VM runs MAX_CYCLES then preempts;
-    // the scheduler switches the active VM (blinkenlib_vm_set) and resumes the
-    // other. Resolves when the CLIENT exits (the server keeps serving) or on
-    // serverTimeoutMs. Returns the client's exit + both VMs' captured output.
-    // DUAL-WORKER concurrency: run a long-lived SERVER guest and a CLIENT guest
-    // on SEPARATE pthreads (Web Workers under -pthread) sharing this wasm
-    // instance's memory/MEMFS/fds/g_socks. Each VM uses NORMAL blocking syscalls
-    // (its own thread blocks; real preemptive scheduling interleaves them), so
-    // the X server can accept + handshake while the client blocks reading — no
-    // cooperative-scheduler starvation. The main thread spins waiting for the
-    // client thread to finish (the server thread keeps serving). Output is the
-    // combined guest stdout/stderr (both threads write the shared buffers).
-    async runConcurrent(serverBytes, clientBytes, {
-      serverArgv=[], serverProgname="/xserver",
-      clientArgv=[], clientProgname="/xclient",
-      clientDelayMs=2000, overallTimeoutMs=40000,
-    }={}){
-      if(exitDeferred) throw new Error("blink-core: a run is already in flight");
-      if(typeof Module._blinkenlib_run_thread!=="function")
-        throw new Error("blink-core: blinkenlib_run_thread missing (rebuild blink)");
-      const FS=Module.FS;
-      const writeProg=(p,bytes)=>{ const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); try{FS.unlink(p)}catch(_){} const fd=FS.open(p,"w+"); FS.write(fd,u8,0,u8.length,0); FS.close(fd); FS.chmod(p,0o755); };
-      writeProg("/xserver",serverBytes); writeProg("/xclient",clientBytes);
-      outBytes=[]; errBytes=[];
-      const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
-      // Spawn + launch the SERVER on its own thread (it runs forever, serving).
-      const spawn=(progname,argvArr)=>{
-        writeStr(prognamePtr,progname,1024);
-        writeArgv(argcPtr, argvArr.length?argvArr:[progname], 4096);
-        writeStr(argvPtr,"",4096);
-        return Module._blinkenlib_vm_spawn(0);   // fresh (m,s) at progname, current
-      };
-      // BOTH guests on their OWN worker pthreads (slot 0 = server, slot 1 =
-      // client) — this avoids the main-thread _blinkenlib_run path whose
-      // setupProgram/TearDown+InitBus re-init aborts while the server thread is
-      // live. Each thread uses normal blocking syscalls; the X handshake
-      // completes via real preemptive scheduling. Witness the client by its
-      // thread EXIT STATUS (xdpyinfo exit 0 = connected+queried the display),
-      // independent of the shared stdout buffer.
-      const serverH=spawn("/xserver",["Xvfb",...serverArgv]);
-      Module._blinkenlib_run_thread_slot(serverH, 0);
-      await sleep(clientDelayMs);   // let the server reach its dispatch loop
-      const clientH=spawn("/xclient",[clientProgname.split("/").pop(),...clientArgv]);
-      Module._blinkenlib_run_thread_slot(clientH, 1);
-      const t0=Date.now(); let timedOut=false;
-      // The X server + client run on emscripten pthreads (Web Workers in the
-      // browser). Blocking syscalls those workers make can be PROXIED to the
-      // main thread; if the main thread just setTimeout-sleeps without servicing
-      // the proxy queue, the worker stalls and thread_done never flips (the
-      // client handshake wedges in-browser, though it completes under node where
-      // libuv schedules the worker threads). Pump the main-thread proxy queue
-      // each poll tick so the worker syscalls get serviced. Symbol is present in
-      // the -pthread build; guard for the non-threaded build.
-      const pumpProxy = typeof Module._emscripten_main_thread_process_queued_calls === "function"
-        ? () => { try { Module._emscripten_main_thread_process_queued_calls(); } catch(_){} }
-        : () => {};
-      while(!Module._blinkenlib_thread_done_slot(1)){
-        if(Date.now()-t0>overallTimeoutMs){ timedOut=true; break; }
-        pumpProxy();
-        await sleep(20);
-      }
-      const clientCode=Module._blinkenlib_thread_done_slot(1)?Module._blinkenlib_thread_status_slot(1):"RUNNING";
-      const out=decode(outBytes), err=decode(errBytes);
-      return { timedOut,
-               client:{ exitCode:clientCode, stdout:out, stderr:err },
-               server:{ exitCode:"RUNNING", stdout:out, stderr:err } };
-    },
-    // PERSISTENT X run model (live windows). Unlike runConcurrent (one-shot:
-    // blocks the caller until the client exits), this keeps the Xvfb server VM
-    // alive on slot 0 indefinitely and lets the host blit fbView() on its own
-    // rAF loop while clients come and go on slot 1. A single always-on proxy
-    // pump (setInterval) services the worker pthreads' proxied syscalls so the
-    // server keeps dispatching and the framebuffer keeps updating between
-    // launches. startXServer() spawns the server + pump and returns immediately;
-    // launchXClient() spawns a client and resolves when THAT client exits (the
-    // server keeps serving); stopX() clears the pump (VMs are reaped on the next
-    // sandbox teardown). The patched Xvfb publishes its framebuffer via 0x5fb,
-    // so fbInfo()/fbView() reflect the live X screen.
-    _xpump:null, _xserverH:null,
-    async startXServer(serverBytes, { argv=[], progname="/xserver" }={}){
-      if(this._xpump) throw new Error("blink-core: X server already running");
-      if(typeof Module._blinkenlib_run_thread_slot!=="function")
-        throw new Error("blink-core: blinkenlib_run_thread_slot missing (rebuild blink)");
-      const FS=Module.FS;
-      const writeProg=(p,bytes)=>{ const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); try{FS.unlink(p)}catch(_){} const fd=FS.open(p,"w+"); FS.write(fd,u8,0,u8.length,0); FS.close(fd); FS.chmod(p,0o755); };
-      writeProg(progname,serverBytes);
-      outBytes=[]; errBytes=[];
-      writeStr(prognamePtr,progname,1024);
-      writeArgv(argcPtr,(argv.length?["Xvfb",...argv]:["Xvfb"]),4096);
-      writeStr(argvPtr,"",4096);
-      this._xserverH=Module._blinkenlib_vm_spawn(0);
-      Module._blinkenlib_run_thread_slot(this._xserverH,0);
-      // Always-on proxy pump: the worker pthreads' blocking syscalls are proxied
-      // to the main thread; without continuous servicing the server stalls and
-      // the framebuffer never advances. 5ms keeps the X dispatch loop fed while
-      // leaving the main thread room for rAF blits/input.
-      const pump = typeof Module._emscripten_main_thread_process_queued_calls==="function"
-        ? () => { try{ Module._emscripten_main_thread_process_queued_calls() }catch(_){} }
-        : () => {};
-      this._xpump=setInterval(pump,5);
-      return this._xserverH;
-    },
-    // Launch a client against the running X server. Resolves with the client's
-    // exit code when it exits; the server keeps serving. Serialized on slot 1
-    // (one client at a time on this slot; sequential launches reuse it).
-    async launchXClient(clientBytes, { argv=[], progname="/xclient", timeoutMs=60000 }={}){
-      if(!this._xpump) throw new Error("blink-core: X server not running (call startXServer)");
-      const FS=Module.FS;
-      const writeProg=(p,bytes)=>{ const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); try{FS.unlink(p)}catch(_){} const fd=FS.open(p,"w+"); FS.write(fd,u8,0,u8.length,0); FS.close(fd); FS.chmod(p,0o755); };
-      writeProg(progname,clientBytes);
-      writeStr(prognamePtr,progname,1024);
-      writeArgv(argcPtr,[progname.split("/").pop(),...argv],4096);
-      writeStr(argvPtr,"",4096);
-      const clientH=Module._blinkenlib_vm_spawn(0);
-      Module._blinkenlib_run_thread_slot(clientH,1);
-      const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
-      // Pump the main-thread proxy queue each poll tick IN ADDITION to the
-      // always-on server interval. The proven one-shot runConcurrent pumps
-      // synchronously every poll; relying on setInterval alone left the slot-1
-      // client wedged (its proxied syscalls weren't serviced promptly enough,
-      // so thread_done never flipped and the client never painted the root).
-      const pumpProxy = typeof Module._emscripten_main_thread_process_queued_calls==="function"
-        ? () => { try{ Module._emscripten_main_thread_process_queued_calls() }catch(_){} }
-        : () => {};
-      const t0=Date.now(); let timedOut=false;
-      while(!Module._blinkenlib_thread_done_slot(1)){
-        if(Date.now()-t0>timeoutMs){ timedOut=true; break; }
-        pumpProxy();
-        await sleep(20);
-      }
-      const exitCode=Module._blinkenlib_thread_done_slot(1)?Module._blinkenlib_thread_status_slot(1):"RUNNING";
-      return { timedOut, exitCode, stdout:decode(outBytes), stderr:decode(errBytes) };
-    },
-    stopX(){ if(this._xpump){ clearInterval(this._xpump); this._xpump=null; } this._xserverH=null; },
-    xRunning(){ return !!this._xpump; },
+    // PERSISTENT X run model (live windows) -- see blink-core-x.js.
+    ...createXRunner(Module, {
+      writeStr, writeArgv, prognamePtr, argcPtr, argvPtr, decode,
+      resetOutput(){ outBytes=[]; errBytes=[]; },
+      getOutBytes(){ return outBytes; }, getErrBytes(){ return errBytes; },
+    }),
     pushStdin(bytes){ for(const b of [...bytes].reverse()) stdinQueue.unshift(b) },
     async runShellScript(busyboxBytes, scriptText, { argv=[], progname="/program" }={}){
       const FS=Module.FS;

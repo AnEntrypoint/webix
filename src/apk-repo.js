@@ -23,19 +23,49 @@ export const DEFAULT_REPOS=[
   "https://dl-cdn.alpinelinux.org/alpine/v3.21/community/x86_64"
 ];
 
-// Fetch a url as bytes, trying direct then each proxy until one returns ok.
-// Throws naming every attempt if all fail (never silently hangs).
-export async function corsFetch(url, { fetchImpl=fetch, proxies=DEFAULT_PROXIES }={}){
-  const tried=[];
+const CORS_FETCH_TIMEOUT_MS=8000;
+const CORS_FETCH_STAGGER_MS=1500;
+
+// Fetch one attempt with a timeout so a HANGING (not just erroring) proxy
+// can't block the whole stagger/race indefinitely.
+async function fetchAttempt(fetchImpl, url, timeoutMs){
+  const ac=typeof AbortController!=="undefined"?new AbortController():null;
+  const timer=ac?setTimeout(()=>ac.abort(),timeoutMs):null;
+  try{
+    const r=await fetchImpl(url, ac?{signal:ac.signal}:{});
+    if(!r.ok) throw Object.assign(new Error("http "+r.status),{httpStatus:r.status});
+    return new Uint8Array(await r.arrayBuffer());
+  } finally { if(timer) clearTimeout(timer); }
+}
+
+// Fetch a url as bytes, racing direct + each proxy staggered by
+// CORS_FETCH_STAGGER_MS instead of trying them strictly in sequence -- a dead
+// first attempt no longer costs a full timeout before the next one starts.
+// Each individual attempt is bounded by CORS_FETCH_TIMEOUT_MS so a HANGING
+// (not just erroring) proxy can't stall the whole race. Throws naming every
+// attempt if all fail (never silently hangs).
+export async function corsFetch(url, { fetchImpl=fetch, proxies=DEFAULT_PROXIES, timeoutMs=CORS_FETCH_TIMEOUT_MS, staggerMs=CORS_FETCH_STAGGER_MS }={}){
   const attempts=[ ["direct", url], ...proxies.map((p,i)=>[`proxy${i}`, p(url)]) ];
-  for(const [label, u] of attempts){
-    try{
-      const r=await fetchImpl(u);
-      if(r.ok) return new Uint8Array(await r.arrayBuffer());
-      tried.push(`${label}:${r.status}`);
-    }catch(e){ tried.push(`${label}:${(e&&e.name)||"err"}`); }
-  }
-  throw new Error(`apk: could not fetch ${url} (tried ${tried.join(", ")}); network or all CORS proxies unreachable`);
+  const tried=new Array(attempts.length);
+  const settled=attempts.map((_, i)=>
+    new Promise(resolve=>{
+      setTimeout(async ()=>{
+        const [label, u]=attempts[i];
+        try{ resolve({ ok:true, i, bytes:await fetchAttempt(fetchImpl, u, timeoutMs) }); }
+        catch(e){ tried[i]=`${label}:${e?.httpStatus ?? e?.name ?? "err"}`; resolve({ ok:false, i }); }
+      }, i*staggerMs);
+    })
+  );
+  return new Promise((resolve, reject)=>{
+    let remaining=settled.length;
+    for(const p of settled){
+      p.then(r=>{
+        if(r.ok){ resolve(r.bytes); return; }
+        remaining--;
+        if(remaining===0) reject(new Error(`apk: could not fetch ${url} (tried ${tried.join(", ")}); network or all CORS proxies unreachable`));
+      });
+    }
+  });
 }
 
 // Strip an apk dependency token to a resolvable key: drop version constraints
@@ -68,19 +98,49 @@ function parseIndexText(text){
   return { byName, byProvide };
 }
 
+const APKINDEX_CACHE="webix-apkindex-v1";
+const APKINDEX_TTL_MS=6*60*60*1000; // 6h: index changes infrequently, tolerable staleness
+
+// Fetch+cache raw APKINDEX.tar.gz bytes in Cache API with a TTL (stamped via a
+// sibling cache entry storing the fetch time). Cache-hit skips the network +
+// every CORS proxy entirely on repeat sessions within the TTL window.
+async function cachedApkIndexBytes(repo, fetchImpl, proxies){
+  const url=repo+"/APKINDEX.tar.gz";
+  if(typeof caches==="undefined") return corsFetch(url, { fetchImpl, proxies });
+  try{
+    const cache=await caches.open(APKINDEX_CACHE);
+    const metaRes=await cache.match(url+"#meta");
+    if(metaRes){
+      const { ts }=await metaRes.json();
+      if(Date.now()-ts<APKINDEX_TTL_MS){
+        const res=await cache.match(url);
+        if(res) return new Uint8Array(await res.arrayBuffer());
+      }
+    }
+    const bytes=await corsFetch(url, { fetchImpl, proxies });
+    await cache.put(url, new Response(bytes));
+    await cache.put(url+"#meta", new Response(JSON.stringify({ ts:Date.now() })));
+    return bytes;
+  }catch(_){ return corsFetch(url, { fetchImpl, proxies }); }
+}
+
 // Load + cache the merged package db across all repos (main, community).
 export function makeRepo({ fetchImpl=fetch, repos=DEFAULT_REPOS, proxies=DEFAULT_PROXIES }={}){
   let dbPromise=null;
   async function load(){
     const merged={ byName:new Map(), byProvide:new Map(), repoOf:new Map() };
-    for(const repo of repos){
-      const gz=await corsFetch(repo+"/APKINDEX.tar.gz", { fetchImpl, proxies });
+    // Fetch every repo's index in parallel instead of a sequential for-loop --
+    // main+community are independent, so there's no reason to serialize them.
+    const results=await Promise.all(repos.map(async repo=>{
+      const gz=await cachedApkIndexBytes(repo, fetchImpl, proxies);
       const tar=await gunzip(gz);
       const idx=parseTar(tar).find(r=>r.name==="APKINDEX");
-      if(!idx) continue;
-      const { byName, byProvide }=parseIndexText(new TextDecoder().decode(idx.data));
-      for(const [n,r] of byName){ if(!merged.byName.has(n)){ merged.byName.set(n,r); merged.repoOf.set(n,repo); } }
-      for(const [p,n] of byProvide){ if(!merged.byProvide.has(p)) merged.byProvide.set(p,n); }
+      return idx ? { repo, ...parseIndexText(new TextDecoder().decode(idx.data)) } : null;
+    }));
+    for(const r of results){
+      if(!r) continue;
+      for(const [n,rec] of r.byName){ if(!merged.byName.has(n)){ merged.byName.set(n,rec); merged.repoOf.set(n,r.repo); } }
+      for(const [p,n] of r.byProvide){ if(!merged.byProvide.has(p)) merged.byProvide.set(p,n); }
     }
     return merged;
   }

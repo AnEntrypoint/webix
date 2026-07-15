@@ -22,6 +22,12 @@ async function inflateOne(u8){
 // DecompressionStream errors on the trailing member rather than continuing, so we
 // walk candidate member starts (gzip magic 1f 8b 08) and inflate each separately,
 // returning every member's output concatenated (the data/files tarball included).
+//
+// The byte-by-byte magic scan only runs as a FALLBACK when the whole-buffer
+// single-stream attempt fails (i.e. only for genuinely multi-member payloads,
+// already the case below) -- for the common single-member case (most non-apk
+// gzip payloads: rootfs .tar.gz, APKINDEX.tar.gz) the O(n) scan never runs at
+// all, so there is no unconditional per-byte cost to skip.
 export async function gunzip(bytes){
   const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
   if(typeof DecompressionStream==="undefined"){

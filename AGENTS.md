@@ -8,16 +8,16 @@ Project invariants for agents (and humans) working on webix.
   Linux ABI, no JS VFS. The host module's only job is to feed an ELF in and
   pump signals/exit/registers out.
 - **Single test.js at repo root.** No tests/ directory, no fixtures, no
-  mocks. test.js exercises Blink+xstate against real ELF and rootfs bytes
-  in containers/.
+  mocks. test.js exercises Blink against real ELF and rootfs bytes in
+  containers/.
 - **<200 lines per file.** If a module grows past 200 lines, split it
   before merging.
-- **xstate v5 only** for actor lifecycle. The xstate-lite hand-roll was
-  removed in 0.6.0; do not reintroduce.
-- **kernel.js never auto-deletes processes.** Processes remain in
-  processActors Map after EXIT with value=="exited", implementing POSIX
-  wait() semantics. Use kernel.reap(pid) for explicit cleanup. Retention
-  is intentional for post-mortem inspection; do not "fix the leak".
+- **No actor/state-machine orchestration layer.** src/kernel.js and
+  src/machines.js (an XState v5 wrapper around runElf) were removed in a
+  later cleanup pass: the browser demo and CLI (bin/xos.mjs) never
+  exercised them, only test.js's own kernel API test did. createBlinkHost's
+  runElf is the sole orchestration surface now; do not reintroduce an
+  actor/state-machine layer without an explicit user instruction.
 - **browser.js is a separate entry point.** package.json conditional
   exports route "." → src/index.js (Node) and "browser" → src/browser.js.
   This split is critical: importing webix in a bundler that previously

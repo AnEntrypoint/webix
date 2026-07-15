@@ -39,6 +39,12 @@ jobs:
           cp containers/busybox-x86_64.elf  docs/assets/
           cp containers/sse2-test.elf       docs/assets/
           cp src/blink-core.js              docs/assets/
+          cp src/blink-core-helpers.js      docs/assets/
+          cp src/blink-core-boot.js         docs/assets/
+          cp src/blink-core-mem.js          docs/assets/
+          cp src/blink-core-io.js           docs/assets/
+          cp src/blink-core-fb.js           docs/assets/
+          cp src/blink-core-x.js            docs/assets/
           cp src/x86_64-blink-browser.js    docs/assets/
           cp src/x86_64-witness-bootstrap.js docs/assets/
           cp src/alpine-apk.js              docs/assets/

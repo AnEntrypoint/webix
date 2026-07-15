@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import process from "node:process";
-import { createKernel } from "../src/kernel.js";
 import { createBlinkHost } from "../src/x86_64-blink.js";
 
 function usage(exit=0){
@@ -25,7 +24,8 @@ const handlers = {
     if(bytes[0]!==0x7f||bytes[4]!==2||new DataView(bytes.buffer).getUint16(18,true)!==62){
       console.error("not an ELF64-x86_64 file:",file); process.exit(2);
     }
-    const r=await createKernel({}).runX86_64Bytes(bytes,{argv:args});
+    const host=await createBlinkHost({});
+    const r=await host.runElf(bytes,{argv:args});
     if(r.stdout) process.stdout.write(r.stdout);
     if(r.stderr) process.stderr.write(r.stderr);
     process.exit(r.exitCode??0);

@@ -5,7 +5,6 @@ import { strict as assert } from "node:assert";
 import { parseELF64 } from "./src/elf.js";
 import { architectures, x86_64, i386 } from "./src/arch.js";
 import { createBlinkHost } from "./src/x86_64-blink.js";
-import { createKernel } from "./src/kernel.js";
 import { createApk } from "./src/alpine-apk.js";
 
 // Build a minimal gzipped .apk (tar.gz) in-memory: a .PKGINFO member + one file.
@@ -67,17 +66,6 @@ await t("hand-built hello-x86_64 ELF prints hi exit 42", async () => {
   const r=await race(host.runElf(HELLO, { argv:["hello"] }), 10000);
   assert.equal(r.exitCode, 42);
   assert.match(r.stdout, /hi/);
-});
-
-await t("kernel.runX86_64Bytes spawns ProcessActor + propagates exit", async () => {
-  const kernel=createKernel({});
-  const r=await race(kernel.runX86_64Bytes(HELLO), 10000);
-  assert.equal(r.exitCode, 42);
-  assert.match(r.stdout, /hi/);
-  assert.equal(typeof r.pid, "number");
-  const snap=kernel.snapshot();
-  assert.equal(snap.processes.length, 1);
-  assert.equal(snap.processes[0][1].value, "exited");
 });
 
 await t("musl-static busybox: echo + uname + expr", async () => {

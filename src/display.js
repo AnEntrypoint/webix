@@ -47,9 +47,6 @@ export function attachDisplay(host, canvas, opts = {}) {
     if (!info) return; // guest has not registered a framebuffer yet
     if (info.generation === lastGen) return; // nothing changed since last paint
 
-    const view = host.fbView();
-    if (!view) return;
-
     if (canvas.width !== info.width || canvas.height !== info.height) {
       canvas.width = info.width;
       canvas.height = info.height;
@@ -59,17 +56,12 @@ export function attachDisplay(host, canvas, opts = {}) {
       imageData = ctx.createImageData(info.width, info.height);
       imgW = info.width; imgH = info.height;
     }
-    // Copy guest pixels into the ImageData. If the guest stride matches
-    // width*4 we can copy the whole block; otherwise copy row by row.
-    const tightStride = info.width * 4;
-    if (view.stride === tightStride) {
-      imageData.data.set(view.pixels.subarray(0, tightStride * info.height));
-    } else {
-      for (let y = 0; y < info.height; y++) {
-        const src = view.pixels.subarray(y * view.stride, y * view.stride + tightStride);
-        imageData.data.set(src, y * tightStride);
-      }
-    }
+    // fbView writes guest pixels straight into imageData.data (stride handling
+    // lives in the one page-wise copy loop inside blink-core, not here) --
+    // fuses the guest-page copy with the ImageData copy, deleting a full
+    // extra frame-sized memcpy every blit.
+    const view = host.fbView(imageData.data);
+    if (!view) return;
     ctx.putImageData(imageData, 0, 0);
     lastGen = info.generation;
     lastPaint = now;

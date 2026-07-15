@@ -2,7 +2,7 @@
   "name": "webix",
   "version": "0.8.0",
   "type": "module",
-  "description": "Blink-backed x86_64 Linux userspace emulator with XState orchestration. Browser + Node.",
+  "description": "Blink-backed x86_64 Linux userspace emulator. Browser + Node.",
   "bin": {
     "xos": "./bin/xos.mjs"
   },
@@ -29,8 +29,7 @@
     "linux",
     "x86_64",
     "wasm",
-    "userspace",
-    "xstate"
+    "userspace"
   ],
   "author": "lanmower",
   "files": [
@@ -58,11 +57,7 @@
     "./blink-browser": "./src/x86_64-blink-browser.js",
     "./blink-core": "./src/blink-core.js",
     "./display": "./src/display.js",
-    "./kernel": "./src/kernel.js",
     "./alpine-apk": "./src/alpine-apk.js"
   },
-  "browser": "./src/browser.js",
-  "dependencies": {
-    "xstate": "^5.18.0"
-  }
+  "browser": "./src/browser.js"
 }

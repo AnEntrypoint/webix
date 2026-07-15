@@ -28,7 +28,6 @@ node_modules
 dist
 docs/assets/*
 !docs/assets/cli.js
-!docs/assets/display.js
 !docs/assets/247420.js
 !docs/assets/247420.css
 .gm/browser-profile/

@@ -4,6 +4,14 @@ const WASM_CACHE="webix-wasm-v1";
 
 // Fetch the wasm bytes with a Cache-API layer so repeat visits skip the network.
 // Returns a Response (so the caller can stream-compile) plus the raw bytes fallback.
+//
+// NOTE: caching the COMPILED WebAssembly.Module (not just these bytes) in
+// IndexedDB was investigated and reverted -- Chromium throws DataCloneError
+// ("A WebAssembly.Module can not be serialized for storage") on every put();
+// browsers briefly supported structured-cloning a compiled Module into IDB
+// and later removed it platform-wide for security reasons. No browser today
+// supports it, so recompiling from cached bytes via instantiateStreaming
+// (below) is the fastest repeat-visit path actually available.
 async function cachedWasmResponse(url){
   if(typeof caches==="undefined") return fetch(url);
   try{
@@ -41,6 +49,10 @@ function makeInstantiateWasm(wasmResponsePromise){
 export async function createBlinkHostBrowser(options={}){
   const wasmUrl=options.wasmUrl??"/containers/blinkenlib.wasm";
   const glueUrl=options.glueUrl??"/containers/blinkenlib.js";
+  // Kick off the wasm fetch/cache-lookup BEFORE awaiting the glue import so
+  // the (potentially large, threaded) wasm download+compile overlaps the glue
+  // module's own network fetch + JS evaluation instead of waiting for it first.
+  const wasmResponsePromise=options.wasmBinary?null:cachedWasmResponse(wasmUrl);
   // The glue is a runtime asset served at glueUrl, NOT a build-time module.
   // The magic comments tell bundlers (webpack/turbopack/vite) to leave this as
   // a native runtime import() instead of trying to resolve '/containers/...' at
@@ -50,7 +62,6 @@ export async function createBlinkHostBrowser(options={}){
   if(options.wasmBinary){
     return createBlinkCore({ wasmBinary:options.wasmBinary, factory, options });
   }
-  const wasmResponsePromise=cachedWasmResponse(wasmUrl);
   return createBlinkCore({
     factory,
     options:{ ...options, instantiateWasm:makeInstantiateWasm(wasmResponsePromise) }
