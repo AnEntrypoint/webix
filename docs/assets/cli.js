@@ -1,5 +1,6 @@
 // docs/assets/cli.js — busybox CLI panel for the webix gh-pages demo
-// Single-command-per-line. argv space-joined upstream; no pipes, no persistent FS.
+// Single-command-per-line. argv is NUL-separated so multi-word/quoted args
+// survive to the guest; no full shell pipelines (no fork), no persistent FS.
 // Banner `\n$ ./busybox <argv>\n` is stripped before display.
 
 const ASSETS = new URL('./', import.meta.url).href;
@@ -19,9 +20,9 @@ async function loadBusybox(x){
 }
 
 function tokenize(line){
-  // light tokenizer: respect double-quoted segments client-side. blink will still
-  // space-join, so quoted-with-space args lose their grouping at the wasm boundary —
-  // surfaced as a documented residual in the page.
+  // light tokenizer: respect double-quoted segments client-side. argv crosses the
+  // wasm boundary NUL-separated, so a quoted-with-space token stays one argument
+  // all the way to the guest (verified by test.js "multi-word argument survives").
   const out=[]; let cur=''; let q=false;
   for (const ch of line){
     if (ch === '"'){ q = !q; continue }
@@ -33,10 +34,14 @@ function tokenize(line){
 }
 
 function stripBanner(stdout, argv){
-  const banner = `\n$ ${argv.join(' ')}\n`;
+  // The guest emits a leading banner line `\n$ ./busybox\n` (progname only —
+  // under NUL-separated argv the C banner no longer echoes the full argv, so
+  // reconstructing it from argv.join(' ') would mismatch and leak the banner).
+  // Strip a single leading `$ <argv0>` line up to and including its newline.
+  const arg0 = argv[0] || './busybox';
+  const banner = `\n$ ${arg0}\n`;
   if (stdout.startsWith(banner)) return stdout.slice(banner.length);
-  // sometimes the leading newline is suppressed
-  const alt = `$ ${argv.join(' ')}\n`;
+  const alt = `$ ${arg0}\n`;
   if (stdout.startsWith(alt)) return stdout.slice(alt.length);
   return stdout;
 }
@@ -138,8 +143,8 @@ export function createCli({ onLine, onStatus }){
   function intro(){
     // the page seeds its own MOTD on boot; keep this minimal to avoid a double banner.
     return [
-      'busybox shell - one applet per line. caveats: no pipes, no /tmp persistence,',
-      'argv is space-joined (quoted args lose grouping).',
+      'busybox shell - one applet per line. caveats: no shell pipelines (no fork),',
+      'no /tmp persistence across commands. quoted multi-word args are preserved.',
       ''
     ].join('\n');
   }

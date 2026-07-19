@@ -22,4 +22,4 @@ webix vendors and depends on third-party software.
 
 ## Runtime dependencies (npm)
 
-- **xstate** v5 — MIT — https://github.com/statelyai/xstate
+None. webix has zero npm runtime dependencies — the Blink wasm owns the emulation surface and the host is dependency-free.

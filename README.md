@@ -1,6 +1,6 @@
 # webix
 
-Blink-backed x86_64 Linux userspace emulator. Browser + Node. ~280 lines of host code over a 240KB Blink wasm that owns CPU, MMU, ~150 Linux x86_64 syscalls, signals, fork/clone, and AF_INET/UNIX/INET6.
+Blink-backed x86_64 Linux userspace emulator. Browser + Node. A compact host over a Blink wasm that owns CPU, MMU, ~150 Linux x86_64 syscalls, signals, threads, and AF_INET/UNIX/INET6 sockets. (No `fork()` — emscripten has none — so full shell pipelines are out; everything else is upstream Blink.)
 
 Replaces what most projects in this category hand-roll: no JS instruction decoder, no JS syscall ABI, no JS VFS — Blink upstream owns all three. The host's job is to feed an ELF in and pump signals/exit out.
 
@@ -8,7 +8,7 @@ Replaces what most projects in this category hand-roll: no JS instruction decode
 
 ```bash
 npm install
-npm test    # 11/11 integration cases against real busybox/apk via Blink
+npm test    # 18/18 integration cases against real busybox/apk via Blink
 ```
 
 ## CLI
@@ -106,11 +106,11 @@ cp src/{blink-core.js,x86_64-blink-browser.js,x86_64-witness-bootstrap.js} docs/
 
 ## Build-flag residuals
 
-This Blink build is `POSIX NOJIT NOSOCK`. Genuine residuals require an emscripten rebuild of `jart/blink`:
+This is the threaded, sockets-enabled, framebuffer-capable `portabox` Blink build (see `blink-core.js` capabilities). Genuine residuals require an emscripten rebuild of `jart/blink`:
 
-- AVX/AVX-512 — currently SIGILL.
-- TCP/UDP networking — `socket(AF_INET)` returns ENOSYS.
-- pthread_create — single-threaded build.
+- AVX/AVX-512 — currently SIGILL (SSE2 only).
+- `fork()`/full shell pipelines — emscripten has no fork(), so `sh -c 'a | b'` cannot spawn stages (pipe() itself works).
+- JIT — structurally impossible under wasm32; NOJIT is permanent in-browser.
 
 `.github/workflows/build-blink.yml` rebuilds blinkenlib.wasm on demand.
 

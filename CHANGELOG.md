@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.8.0] — portabox build + perf/minimization + doc-truth pass
+
+- Blink wasm: the vendored `containers/blinkenlib.wasm` is now the threaded,
+  sockets-enabled, framebuffer-capable `portabox` build (`-pthread`,
+  `--enable-sockets`, syscall-0x5fb framebuffer). Capabilities:
+  `{ sockets:true, threads:true, sharedMemory:true, pipe:true, framebuffer:true,
+  pipelines:false, fork:false, jit:false, vectorISA:"sse2" }`. Supersedes the
+  earlier POSIX NOJIT NOSOCK single-threaded build. Threads need
+  crossOriginIsolated (COOP/COEP) at serve time.
+- Removed the XState kernel/machines layer (`src/kernel.js`, `src/machines.js`):
+  unused indirection over `createBlinkCore.runElf`, which is now the sole
+  orchestration surface. webix has zero npm runtime dependencies.
+- Perf + minimization pass (45ed047): preload busybox CLI handle, fuse fbView
+  into the caller ImageData buffer, page-pointer-cache framebuffer host
+  pointers, MessageChannel-based preempt resume, parallel apk index fetch +
+  dep-closure resolution, lazy rootfs mount, split blink-core.js into 7
+  sub-200-line modules. argv is NUL-separated (multi-word args survive).
+- Doc-truth pass: corrected stale POSIX NOJIT NOSOCK / single-threaded /
+  fork-clone / space-joined-argv / xstate-feature / 15-11-test-count claims
+  across README, NOTICE, docs/index.html, and docs/assets/cli.js to match the
+  live `blink-core.js` capabilities. Fixed `stripBanner` to match the
+  progname-only NUL-argv banner. test.js: 18/18.
+
 ## [unreleased] — gh-pages demo redesign (247420 storytelling)
 
 - docs/index.html: rewritten as a 247420-shaped story. `installStyles()`

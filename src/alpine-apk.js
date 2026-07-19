@@ -1,8 +1,9 @@
 // alpine-apk.js — install from the Alpine package ecosystem on a blink host.
 //
-// The vendored blink wasm is POSIX NOJIT NOSOCK single-threaded: socket(AF_INET)
-// is ENOSYS, pipe() is EBADF, pthread_create unsupported. The real apk-tools
-// binary cannot fetch over the network or spawn its child stages here. So apk is
+// emscripten has no fork() (there is no real process creation under wasm), so
+// the real apk-tools binary cannot spawn its child fetch/extract stages here —
+// this is the permanent blocker, not a socket/thread limit (the vendored wasm is
+// threaded + sockets-enabled, see blink-core.js capabilities). So apk is
 // implemented JS-side: a .apk is a gzip tarball; "apk add" decompresses it and
 // extracts its members into the host's emscripten FS rootfs, then records the
 // package in /lib/apk/db/installed. The installed files are then runnable via

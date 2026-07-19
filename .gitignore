@@ -19,6 +19,7 @@
 .plugkit-browser-profile/
 .plugkit-browser-profile-*/
 .plugkit-agent-worktree/
+.agentplug-kv/
 *.stackdump
 node_modules
 .plugkit-browser-profile
