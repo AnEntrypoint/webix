@@ -103,6 +103,19 @@ export function writeRecord(FS, root, rec){
   return false;
 }
 
+// Verify a fetched .apk's bytes against APKINDEX's C: field ("Q1<base64 sha1>",
+// the checksum format apk-tools uses -- SHA1 over the whole .apk file). Returns
+// true/false; a missing/malformed checksum (older index format, "Q2"+bkp sha256
+// not yet seen live) returns null (unverifiable, not a mismatch) so callers can
+// distinguish "proven bad" from "nothing to check against".
+export async function verifyChecksum(bytes, checksum){
+  if(!checksum || !checksum.startsWith("Q1")) return null;
+  if(typeof crypto==="undefined" || !crypto.subtle) return null;
+  const digest=await crypto.subtle.digest("SHA-1", bytes);
+  const b64=btoa(String.fromCharCode(...new Uint8Array(digest)));
+  return b64===checksum.slice(2);
+}
+
 export function readPkgInfo(records){
   const info=records.find(r=>r.name===".PKGINFO");
   const meta={ name:null, version:null };

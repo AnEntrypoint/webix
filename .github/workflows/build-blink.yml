@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: emscripten-core/setup-emsdk@v15
         with:
           version: 3.1.69
 
@@ -637,7 +637,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: emscripten-core/setup-emsdk@v15
         with:
           version: 3.1.69
       - name: Clone blink fork

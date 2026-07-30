@@ -13,7 +13,7 @@
 // a CORS-proxy chain (see apk-repo.js): parse APKINDEX, resolve name + deps, pull
 // each .apk live, extract into the FS.
 
-import { gunzip, parseTar, mkdirp, writeRecord, readPkgInfo } from "./apk-format.js";
+import { gunzip, parseTar, mkdirp, writeRecord, readPkgInfo, verifyChecksum } from "./apk-format.js";
 import { makeRepo, corsFetch, depKey } from "./apk-repo.js";
 
 // Create an apk surface over a blink host. `root` is the guest rootfs prefix
@@ -81,7 +81,7 @@ export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"
       return depPkg;
     }))).filter(Boolean);
     await Promise.all(depPkgs.map(dep=>resolveClosure(dep, seen, order)));
-    order.push({ name:pkgName, url:meta.url, version:meta.version });
+    order.push({ name:pkgName, url:meta.url, version:meta.version, checksum:meta.checksum });
     return pkgName;
   }
 
@@ -113,6 +113,15 @@ export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"
     const order=[];
     await resolveClosure(name, new Set(), order);
     const fetched=await mapLimit(order, concurrency, async pkg=>({ pkg, bytes:await corsFetch(pkg.url, { fetchImpl, ...(repoOpts||{}) }) }));
+    // Verify each fetch against APKINDEX's checksum before extracting -- a
+    // compromised/MITM'd CORS proxy (third-party infra we don't control) could
+    // otherwise silently substitute a malicious .apk. A missing/unparseable
+    // checksum (verifyChecksum returns null) is not itself a failure -- it just
+    // means the index didn't carry one to check against.
+    for(const { pkg, bytes } of fetched){
+      const ok=await verifyChecksum(bytes, pkg.checksum);
+      if(ok===false) throw new Error(`apk: checksum mismatch for ${pkg.name}-${pkg.version} (possible corrupted fetch or tampered CORS-proxy response)`);
+    }
     let result=null;
     for(const { pkg, bytes } of fetched){
       const r=await addBytes(bytes);

@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased] — security hardening pass
+
+- apk installs now verify fetched `.apk` bytes against Alpine's APKINDEX `C:`
+  checksum field (SHA1, `Q1<base64>` format) before extraction. Closes a real
+  MITM gap: fetches route through third-party CORS proxies (codetabs,
+  allorigins, corsproxy.io, a self-hosted Cloudflare Worker) since Alpine
+  mirrors send no CORS headers, and a compromised proxy could otherwise
+  silently substitute a malicious `.apk`. A missing/unparseable checksum is
+  treated as unverifiable, not a failure (older index formats may lack `C:`).
+- `docs/index.html` now ships a Content-Security-Policy meta tag scoping
+  `connect-src`/`script-src`/`style-src`/`font-src` to the known CORS-proxy
+  hosts, Alpine's CDN, Google Fonts, and self — reducing blast radius now
+  that the demo runs untrusted third-party binaries with live sockets and
+  network access enabled. `script-src` includes `'wasm-unsafe-eval'` (hard
+  requirement for the wasm module to instantiate under a CSP).
+- `build-blink.yml`: switched `mymindstorm/setup-emsdk@v14` (renamed/
+  unmaintained slug) to the official `emscripten-core/setup-emsdk@v15`.
+
 ## [0.8.0] — portabox build + perf/minimization + doc-truth pass
 
 - Blink wasm: the vendored `containers/blinkenlib.wasm` is now the threaded,

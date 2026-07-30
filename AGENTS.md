@@ -92,6 +92,34 @@ below (kept for history). Current reality, witnessed by `test.js` 19/19:
   cooperative scheduling or threads, never fork.
 - **JIT impossible.** Blink's JIT emits native x86-64/aarch64 only; under
   wasm32 it is structurally impossible. NOJIT is permanent in-browser.
+- **AVX/AVX-512 permanently out of reach, closed investigation (2026-07-30
+  research pass).** No build flag unlocks AVX in `blinkenlib.wasm`. Emulating
+  AVX2 (256-bit) as paired WASM SIMD128 (128-bit) ops is a real,
+  bounded-but-nontrivial technique (used by emscripten's own AVX2 intrinsic
+  headers and Google Highway's WASM_EMU256 target) but would need to be
+  implemented inside Blink's own instruction decoder (upstream C, not a
+  webix-side change) — no evidence anyone has done this for Blink. AVX-512
+  stays structurally impossible regardless (no wasm proposal targets
+  512-bit). WASM relaxed-SIMD (shipped) only adds fused ops on the existing
+  128-bit vector type, it does not widen registers. Do not re-open this
+  without a concrete upstream Blink patch in hand.
+- **WASI preview2/component model is not a migration path, closed
+  investigation (2026-07-30).** WASI 0.2 (stabilized ~Jan 2026) is
+  explicitly not POSIX-compatible (no fork/exec, no signals,
+  capability-based FS only) — architecturally incompatible with Blink's
+  full-Linux-ABI-emulation approach. Keep the current Blink-in-wasm
+  architecture; do not re-investigate without a fundamentally different
+  target.
+- **Non-streaming shell-pipeline emulation is buildable, not yet
+  implemented.** `blink-core.js`'s `exitDeferred` guard already forces
+  strict sequential `runElf` calls, so a JS-level shell preprocessing layer
+  could fake `sh -c 'a|b'` by running stage `a` to completion, capturing its
+  full stdout, and feeding those bytes as stdin to stage `b`'s `runElf`.
+  This is **batch composition, not real streaming** — works for `ls|sort`,
+  fails for `yes|head`, `tail -f|grep`, or anything interactive/infinite.
+  No blink/wasm changes needed if implemented; scope it explicitly as
+  non-streaming if built, so a future session doesn't assume real
+  concurrent pipes work.
 
 ---
 

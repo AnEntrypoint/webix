@@ -35,6 +35,7 @@ function parseIndexText(text){
       else if(k==="T") rec.summary=v;          // pkgdesc (one-line title)
       else if(k==="D") rec.depends=v.split(" ").filter(Boolean);
       else if(k==="p") rec.provides=v.split(" ").filter(Boolean);
+      else if(k==="C") rec.checksum=v;         // "Q1<base64 sha1>" over the .apk file bytes
     }
     if(!rec.name) continue;
     byName.set(rec.name, rec);
@@ -103,7 +104,7 @@ export function makeRepo({ fetchImpl=fetch, repos=DEFAULT_REPOS, proxies=DEFAULT
     async apkUrl(name){
       const M=await db();
       const r=M.byName.get(name); if(!r) return null;
-      return { url:`${M.repoOf.get(name)}/${r.name}-${r.version}.apk`, version:r.version, depends:r.depends };
+      return { url:`${M.repoOf.get(name)}/${r.name}-${r.version}.apk`, version:r.version, depends:r.depends, checksum:r.checksum };
     },
     // Browse the merged repo index: substring match over name+summary, optional
     // GUI-only filter (depends on an X/display lib), paginated. Powers the
