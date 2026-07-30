@@ -26,7 +26,16 @@ export const DEFAULT_PROXIES=[
   u=>`https://wranger.almagestfraternite.workers.dev/?quest=${encodeURIComponent(u)}`
 ];
 
-const CORS_FETCH_TIMEOUT_MS=8000;
+// Most .apk files are small (tens to hundreds of KB), but some are genuinely
+// large -- icu-data-full-74.2-r1.apk (an ICU locale-data package, pulled in
+// as a nodejs dependency) is 12MB and took ~11s to fetch through wranger via
+// a direct curl, well past the old 8000ms per-attempt budget. Live-witnessed:
+// `apk add nodejs` failed on exactly this file with every proxy reporting
+// AbortError/403 -- not because the proxies were down (curl against the same
+// URL succeeded, 200, 12086361 bytes), but because the 8s timeout aborted a
+// fetch that was still genuinely in flight. Raised to comfortably cover large
+// files without making a truly-hung proxy block the race for too long.
+const CORS_FETCH_TIMEOUT_MS=20000;
 const CORS_FETCH_STAGGER_MS=1500;
 
 // Fetch one attempt with a timeout so a HANGING (not just erroring) proxy
