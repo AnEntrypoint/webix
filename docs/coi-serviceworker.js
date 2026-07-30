@@ -14,6 +14,19 @@ if (typeof window === "undefined") {
   self.addEventListener("fetch", (event) => {
     const req = event.request;
     if (req.cache === "only-if-cached" && req.mode !== "same-origin") return;
+    // Only the document/navigation and same-origin asset loads need the
+    // COOP/COEP header injection -- that's what makes the PAGE itself
+    // crossOriginIsolated. Cross-origin requests (CORS-proxy fetches to
+    // codetabs/allorigins/corsproxy.io/wranger, or a direct attempt at
+    // dl-cdn.alpinelinux.org for apk) must pass through untouched: re-fetching
+    // them here and trying to rebuild a Response with injected headers hits
+    // the SW's own same-origin-policy restrictions on a cross-origin fetch
+    // (even one the page's own fetch() could read via CORS), so `fetch(req)`
+    // inside the worker throws and the .catch() below turned every failed
+    // apk network call into a synthetic 500 body "coi-serviceworker fetch
+    // failed: ..." -- gunzip() then saw that text instead of real gzip bytes
+    // and apk search/add broke silently. Only intercept same-origin.
+    if (req.mode !== "same-origin" && new URL(req.url).origin !== self.location.origin) return;
     event.respondWith(
       fetch(req).then((res) => {
         if (res.status !== 0 && !res.headers.get("Cross-Origin-Embedder-Policy")) {
