@@ -103,17 +103,57 @@ export function writeRecord(FS, root, rec){
   return false;
 }
 
-// Verify a fetched .apk's bytes against APKINDEX's C: field ("Q1<base64 sha1>",
-// the checksum format apk-tools uses -- SHA1 over the whole .apk file). Returns
-// true/false; a missing/malformed checksum (older index format, "Q2"+bkp sha256
-// not yet seen live) returns null (unverifiable, not a mismatch) so callers can
+// Find the byte range [start,end) of the FIRST gzip member (magic 1f 8b 08)
+// in a possibly-multi-member buffer, matching gunzip()'s own member walk.
+// Real apk v2 files are [optional .SIGN.RSA gzip member][control.tar.gz
+// member][data.tar.gz member] concatenated -- the control member is
+// whichever one is first EXCEPT when a signature member precedes it (real
+// signed packages: signature first, so its own gzip magic is member 0 and
+// control.tar.gz is member 1). Distinguishing them requires inflating each
+// candidate and checking for a .PKGINFO entry, since apk-tools itself
+// verifies the checksum this way (over the control member specifically),
+// not the whole file.
+function findGzipMemberStarts(u8){
+  const starts=[];
+  for(let i=0;i+2<u8.length;i++){ if(u8[i]===0x1f && u8[i+1]===0x8b && u8[i+2]===0x08) starts.push(i); }
+  return starts;
+}
+
+// Verify a fetched .apk's bytes against APKINDEX's C: field ("Q1<base64
+// sha1>"). apk-tools computes this SHA1 over the COMPRESSED bytes of the
+// control.tar.gz member specifically (the one containing .PKGINFO), not the
+// whole concatenated .apk file -- verified live against a real fetched
+// musl-1.2.5-r11.apk whose whole-file SHA1 did not match its APKINDEX C:
+// field, while extracting the member with a .PKGINFO entry inside does.
+// Returns true/false; a missing/malformed checksum, an undecodable member,
+// or no crypto.subtle returns null (unverifiable, not a mismatch) so callers
 // distinguish "proven bad" from "nothing to check against".
 export async function verifyChecksum(bytes, checksum){
   if(!checksum || !checksum.startsWith("Q1")) return null;
   if(typeof crypto==="undefined" || !crypto.subtle) return null;
-  const digest=await crypto.subtle.digest("SHA-1", bytes);
-  const b64=btoa(String.fromCharCode(...new Uint8Array(digest)));
-  return b64===checksum.slice(2);
+  const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
+  const starts=findGzipMemberStarts(u8);
+  if(!starts.length) return null;
+  // Whole-file single-member case (no concatenation): hash the whole thing.
+  if(starts.length===1){
+    const digest=await crypto.subtle.digest("SHA-1", u8);
+    return btoa(String.fromCharCode(...new Uint8Array(digest)))===checksum.slice(2);
+  }
+  // Multi-member: find the member whose inflated tar contains .PKGINFO,
+  // hash THAT member's still-compressed byte range.
+  for(let s=0;s<starts.length;s++){
+    const begin=starts[s];
+    const end=s+1<starts.length?starts[s+1]:u8.length;
+    const memberBytes=u8.subarray(begin,end);
+    try{
+      const tar=await inflateOne(memberBytes);
+      if(parseTar(tar).some(r=>r.name===".PKGINFO")){
+        const digest=await crypto.subtle.digest("SHA-1", memberBytes);
+        return btoa(String.fromCharCode(...new Uint8Array(digest)))===checksum.slice(2);
+      }
+    }catch(_){ /* not a valid member on its own, try next */ }
+  }
+  return null;
 }
 
 export function readPkgInfo(records){
