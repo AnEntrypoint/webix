@@ -50,34 +50,44 @@ const APKINDEX_TTL_MS=6*60*60*1000; // 6h: index changes infrequently, tolerable
 // Fetch+cache raw APKINDEX.tar.gz bytes in Cache API with a TTL (stamped via a
 // sibling cache entry storing the fetch time). Cache-hit skips the network +
 // every CORS proxy entirely on repeat sessions within the TTL window.
+// The Cache API matches requests IGNORING the URL fragment (everything after
+// '#') by spec -- it's never sent to a server, so Cache.match()/.put() strip
+// it before keying. url and url+"#meta" therefore collided on the SAME cache
+// slot: whichever cache.put() ran second silently clobbered the first, and
+// since the meta write always ran after the data write (line order below),
+// the real gzip bytes were permanently overwritten by the tiny JSON meta
+// blob on every single cache write, for every visitor, since this caching
+// layer was added. cache.match(url) then returned the meta JSON text
+// instead of gzip bytes, and gunzip() correctly rejected it as corrupt --
+// but the SAME collision reproduced on every subsequent write too, so the
+// cache never actually cached real index bytes at all. A query string (?)
+// IS part of the default cache key (only the fragment is stripped), so
+// "?meta=1" is a real, non-colliding second key.
+const APKINDEX_META_SUFFIX="?meta=1";
+
 async function cachedApkIndexBytes(repo, fetchImpl, proxies){
   const url=repo+"/APKINDEX.tar.gz";
   if(typeof caches==="undefined") return corsFetch(url, { fetchImpl, proxies });
   try{
     const cache=await caches.open(APKINDEX_CACHE);
-    const metaRes=await cache.match(url+"#meta");
+    const metaRes=await cache.match(url+APKINDEX_META_SUFFIX);
     if(metaRes){
       const { ts }=await metaRes.json();
       if(Date.now()-ts<APKINDEX_TTL_MS){
         const res=await cache.match(url);
         if(res){
           const cached=new Uint8Array(await res.arrayBuffer());
-          // A cache entry written while some upstream layer was broken (seen
-          // live: coi-serviceworker.js corrupting cross-origin fetches into a
-          // synthetic error response) persists in this per-origin Cache API
-          // storage indefinitely -- it survives session resets, hard reloads,
-          // and cache-busted URLs, because it's a real storage API, not HTTP
-          // caching. Validate the cached bytes actually decode as gzip before
-          // trusting them; a stale/corrupted entry falls through to a fresh
-          // fetch instead of poisoning every future page load for anyone who
-          // visited while the bug was live.
+          // Defense in depth against any other stale/corrupted cache entry
+          // (e.g. one written during the coi-serviceworker cross-origin-fetch
+          // corruption bug, before that was fixed): validate the cached bytes
+          // actually decode as gzip before trusting them.
           try{ await gunzip(cached); return cached; }catch(_){ /* corrupted cache entry, fall through to refetch */ }
         }
       }
     }
     const bytes=await corsFetch(url, { fetchImpl, proxies });
     await cache.put(url, new Response(bytes));
-    await cache.put(url+"#meta", new Response(JSON.stringify({ ts:Date.now() })));
+    await cache.put(url+APKINDEX_META_SUFFIX, new Response(JSON.stringify({ ts:Date.now() })));
     return bytes;
   }catch(_){ return corsFetch(url, { fetchImpl, proxies }); }
 }
