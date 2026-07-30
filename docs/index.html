@@ -98,6 +98,7 @@
     .wb-tw-chip:hover{background:rgba(40,200,64,.12);border-color:#28c840;color:#e6e6e6}
     .wb-tw-chip[disabled]{opacity:.4;cursor:default}
   </style>
+  <script src="./coi-serviceworker.js"></script>
   <script>
     // theme: respect saved choice, else OS preference. set before paint to avoid flash.
     (function(){
@@ -515,7 +516,15 @@
     }
 
     render();
-    boot();
+    // If coi-serviceworker.js is about to force a reload to pick up the
+    // COOP/COEP-isolated context (see that file), this page instance is
+    // doomed — skip booting the (currently non-isolated, shared-memory-
+    // requiring) wasm here and let the reloaded page boot instead.
+    if (window.crossOriginIsolated === false && "serviceWorker" in navigator && !navigator.serviceWorker.controller) {
+      log('waiting for cross-origin isolation (reloading once)...');
+    } else {
+      boot();
+    }
   </script>
 </body>
 </html>
