@@ -90,7 +90,17 @@ export function makeRepo({ fetchImpl=fetch, repos=DEFAULT_REPOS, proxies=DEFAULT
     }
     return merged;
   }
-  function db(){ return (dbPromise||=load()); }
+  // A failed load() (transient proxy/network flakiness) must not poison every
+  // later apk call for the rest of the page session -- dbPromise||=load() used
+  // to cache the REJECTED promise forever, since a rejected promise is still a
+  // non-null value. Clear it on failure so the next db() call retries fresh.
+  function db(){
+    if(!dbPromise){
+      dbPromise=load();
+      dbPromise.catch(()=>{ dbPromise=null; });
+    }
+    return dbPromise;
+  }
   return {
     db,
     async resolve(token){
