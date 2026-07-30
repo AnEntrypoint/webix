@@ -113,7 +113,11 @@ export function createCli({ onLine, onStatus }){
   // is tried as-is first).
   function findRealBinary(x, name){
     if (name.includes('/')) return name.startsWith('/') ? name : null;
-    const FS = x.Module?.FS;
+    // window.__debug.x86_64 has no `Module` of its own -- the emscripten
+    // Module/FS lives on `host.Module`. x.Module?.FS was always undefined,
+    // so this always fell through to busybox; live-witnessed nodejs
+    // installing fine (23 packages) yet `node` still "applet not found".
+    const FS = x.host?.Module?.FS;
     if (!FS) return null;
     for (const dir of ['/usr/bin', '/bin', '/usr/sbin', '/sbin']){
       const p = `${dir}/${name}`;
@@ -134,7 +138,7 @@ export function createCli({ onLine, onStatus }){
     const realBin = findRealBinary(x, userTokens[0]);
     const argv = realBin ? [realBin, ...userTokens.slice(1)] : ['./busybox', ...userTokens];
     const path = realBin ? undefined : await loadBusybox(x);
-    const bytes = realBin ? x.Module.FS.readFile(realBin) : undefined;
+    const bytes = realBin ? x.host.Module.FS.readFile(realBin) : undefined;
 
     onStatus?.('running');
     const r = realBin
