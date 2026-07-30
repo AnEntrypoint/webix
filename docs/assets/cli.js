@@ -104,6 +104,24 @@ export function createCli({ onLine, onStatus }){
     }
   }
 
+  // Resolve the first token to a real installed binary's path -- apk-installed
+  // packages (nodejs, python3, etc) land in /usr/bin or /bin as real ELFs, not
+  // busybox applets, so forcing every command through `./busybox <cmd>` made
+  // them unreachable ("applet not found") even after a successful apk add.
+  // Checked ONLY for names not already resolvable as a busybox applet path
+  // (an absolute/relative path the user typed directly, e.g. `/usr/bin/node`,
+  // is tried as-is first).
+  function findRealBinary(x, name){
+    if (name.includes('/')) return name.startsWith('/') ? name : null;
+    const FS = x.Module?.FS;
+    if (!FS) return null;
+    for (const dir of ['/usr/bin', '/bin', '/usr/sbin', '/sbin']){
+      const p = `${dir}/${name}`;
+      try { if (FS.analyzePath(p).exists) return p; } catch(_){}
+    }
+    return null;
+  }
+
   async function exec(input){
     const trimmed = input.trim();
     if (!trimmed) return { stdout:'', stderr:'', exitCode:0 };
@@ -112,12 +130,23 @@ export function createCli({ onLine, onStatus }){
 
     const userTokens = tokenize(trimmed);
     if (userTokens[0] === 'apk') return execApk(x, userTokens.slice(1));
-    const argv = ['./busybox', ...userTokens];
-    const handle = await loadBusybox(x);
+
+    const realBin = findRealBinary(x, userTokens[0]);
+    const argv = realBin ? [realBin, ...userTokens.slice(1)] : ['./busybox', ...userTokens];
+    const path = realBin ? undefined : await loadBusybox(x);
+    const bytes = realBin ? x.Module.FS.readFile(realBin) : undefined;
 
     onStatus?.('running');
-    const r = await x.runElf(null, { argv, path: handle });
+    const r = realBin
+      ? await x.runElf(bytes, { argv, progname: realBin })
+      : await x.runElf(null, { argv, path });
     onStatus?.('ready');
+    // The banner (`\n$ <argv0>\n`) is emitted by the guest's own init/libc
+    // path regardless of whether the ELF ran via busybox or a directly
+    // loaded real binary -- confirmed live for both /usr/bin/hello (a
+    // freestanding ELF) and /bin/ls (an alpine musl-libc binary, itself a
+    // busybox symlink installed by the base rootfs, not by apk). Always
+    // strip it.
     const clean = stripBanner(r.stdout, argv);
     return { stdout: clean, stderr: r.stderr, exitCode: r.exitCode, argv };
   }
