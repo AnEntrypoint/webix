@@ -6,14 +6,24 @@
 // reliable proxy (verified: type:cors 200, full binary, no rate limit); the others
 // are best-effort fallbacks for when codetabs blips.
 
-// quest takes the RAW url (no encoding); the rest take an encoded url.
-// wranger is our self-hosted Cloudflare Worker (open generic-proxy mode); listed
-// last so it absorbs traffic only when the three public proxies all fail.
+// codetabs' quest= takes the RAW url (no encoding, verified live); the other
+// three take a standard encodeURIComponent'd url. wranger (our self-hosted
+// Cloudflare Worker) was ALSO passed a raw url on the codetabs assumption --
+// wrong: Cloudflare Workers parse ?quest= as a normal
+// application/x-www-form-urlencoded query param, where a literal '+' means
+// space, not a plus sign. A raw (unencoded) url containing '+' -- e.g.
+// libstdc++-14.2.0-r4.apk -- silently became "libstdc  -14.2.0-r4.apk" on
+// wranger's side and 404'd, even though the real file exists on the mirror
+// (verified live: direct fetch of the real mirror URL = 200, wranger with
+// the raw url = 404, wranger with encodeURIComponent(url) = 200, exact byte
+// count matching direct). wranger is our self-hosted fallback listed last so
+// it absorbs traffic only when the three public proxies all fail -- exactly
+// the case a package name with '+' in it (libstdc++, g++, etc) hit here.
 export const DEFAULT_PROXIES=[
   u=>`https://api.codetabs.com/v1/proxy/?quest=${u}`,
   u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   u=>`https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-  u=>`https://wranger.almagestfraternite.workers.dev/?quest=${u}`
+  u=>`https://wranger.almagestfraternite.workers.dev/?quest=${encodeURIComponent(u)}`
 ];
 
 const CORS_FETCH_TIMEOUT_MS=8000;
