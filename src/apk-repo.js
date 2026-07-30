@@ -60,7 +60,19 @@ async function cachedApkIndexBytes(repo, fetchImpl, proxies){
       const { ts }=await metaRes.json();
       if(Date.now()-ts<APKINDEX_TTL_MS){
         const res=await cache.match(url);
-        if(res) return new Uint8Array(await res.arrayBuffer());
+        if(res){
+          const cached=new Uint8Array(await res.arrayBuffer());
+          // A cache entry written while some upstream layer was broken (seen
+          // live: coi-serviceworker.js corrupting cross-origin fetches into a
+          // synthetic error response) persists in this per-origin Cache API
+          // storage indefinitely -- it survives session resets, hard reloads,
+          // and cache-busted URLs, because it's a real storage API, not HTTP
+          // caching. Validate the cached bytes actually decode as gzip before
+          // trusting them; a stale/corrupted entry falls through to a fresh
+          // fetch instead of poisoning every future page load for anyone who
+          // visited while the bug was live.
+          try{ await gunzip(cached); return cached; }catch(_){ /* corrupted cache entry, fall through to refetch */ }
+        }
       }
     }
     const bytes=await corsFetch(url, { fetchImpl, proxies });
