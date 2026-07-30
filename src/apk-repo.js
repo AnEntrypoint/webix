@@ -1,72 +1,17 @@
-// apk-repo.js — live Alpine repository over CORS.
-//
-// Alpine mirrors send no CORS headers, so a static page can't read them directly.
-// We fetch through a ranked proxy chain: try the mirror directly first (works when
-// the browser/extension allows it), then public CORS proxies. codetabs is the one
-// reliable proxy (verified: type:cors 200, full binary, no rate limit); the others
-// are best-effort fallbacks for when codetabs blips.
+// apk-repo.js — live Alpine repository index: fetch+parse APKINDEX, resolve
+// package/provide names, browse via search. CORS-proxy fetch mechanics live
+// in apk-fetch.js (split out to keep this file under the repo's 200-line cap);
+// re-exported here so existing importers (alpine-apk.js) are unaffected.
 
 import { gunzip, parseTar } from "./apk-format.js";
+import { corsFetch, DEFAULT_PROXIES } from "./apk-fetch.js";
 
-// quest takes the RAW url (no encoding); the rest take an encoded url.
-// wranger is our self-hosted Cloudflare Worker (open generic-proxy mode); listed
-// last so it absorbs traffic only when the three public proxies all fail.
-export const DEFAULT_PROXIES=[
-  u=>`https://api.codetabs.com/v1/proxy/?quest=${u}`,
-  u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u=>`https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-  u=>`https://wranger.almagestfraternite.workers.dev/?quest=${u}`
-];
+export { corsFetch, DEFAULT_PROXIES };
 
 export const DEFAULT_REPOS=[
   "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64",
   "https://dl-cdn.alpinelinux.org/alpine/v3.21/community/x86_64"
 ];
-
-const CORS_FETCH_TIMEOUT_MS=8000;
-const CORS_FETCH_STAGGER_MS=1500;
-
-// Fetch one attempt with a timeout so a HANGING (not just erroring) proxy
-// can't block the whole stagger/race indefinitely.
-async function fetchAttempt(fetchImpl, url, timeoutMs){
-  const ac=typeof AbortController!=="undefined"?new AbortController():null;
-  const timer=ac?setTimeout(()=>ac.abort(),timeoutMs):null;
-  try{
-    const r=await fetchImpl(url, ac?{signal:ac.signal}:{});
-    if(!r.ok) throw Object.assign(new Error("http "+r.status),{httpStatus:r.status});
-    return new Uint8Array(await r.arrayBuffer());
-  } finally { if(timer) clearTimeout(timer); }
-}
-
-// Fetch a url as bytes, racing direct + each proxy staggered by
-// CORS_FETCH_STAGGER_MS instead of trying them strictly in sequence -- a dead
-// first attempt no longer costs a full timeout before the next one starts.
-// Each individual attempt is bounded by CORS_FETCH_TIMEOUT_MS so a HANGING
-// (not just erroring) proxy can't stall the whole race. Throws naming every
-// attempt if all fail (never silently hangs).
-export async function corsFetch(url, { fetchImpl=fetch, proxies=DEFAULT_PROXIES, timeoutMs=CORS_FETCH_TIMEOUT_MS, staggerMs=CORS_FETCH_STAGGER_MS }={}){
-  const attempts=[ ["direct", url], ...proxies.map((p,i)=>[`proxy${i}`, p(url)]) ];
-  const tried=new Array(attempts.length);
-  const settled=attempts.map((_, i)=>
-    new Promise(resolve=>{
-      setTimeout(async ()=>{
-        const [label, u]=attempts[i];
-        try{ resolve({ ok:true, i, bytes:await fetchAttempt(fetchImpl, u, timeoutMs) }); }
-        catch(e){ tried[i]=`${label}:${e?.httpStatus ?? e?.name ?? "err"}`; resolve({ ok:false, i }); }
-      }, i*staggerMs);
-    })
-  );
-  return new Promise((resolve, reject)=>{
-    let remaining=settled.length;
-    for(const p of settled){
-      p.then(r=>{
-        if(r.ok){ resolve(r.bytes); return; }
-        remaining--;
-        if(remaining===0) reject(new Error(`apk: could not fetch ${url} (tried ${tried.join(", ")}); network or all CORS proxies unreachable`));
-      });
-    }
-  });
-}
 
 // Strip an apk dependency token to a resolvable key: drop version constraints
 // (pkg>=1.2, pkg=1.2-r3, pkg~1.2) and ignore conflicts (!pkg). so:/cmd:/pc:

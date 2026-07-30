@@ -50,6 +50,7 @@ jobs:
           cp src/alpine-apk.js              docs/assets/
           cp src/apk-format.js              docs/assets/
           cp src/apk-repo.js                docs/assets/
+          cp src/apk-fetch.js               docs/assets/
           cp containers/alpine-minirootfs-x86_64.tar.gz docs/assets/
           cp containers/busybox-static.apk  docs/assets/
           ls -lh docs/assets/

@@ -250,7 +250,7 @@
         state.term.push({ kind:'x', text:
           'webix 0.8 - blink x86_64 linux userspace (threaded + sockets + framebuffer)\n' +
           'booted hello-x86_64.elf -> exit ' + (state.lastExit ?? '?') + ' (rax=0x3c rdi=0x2a)\n' +
-          'type a command, or tap a chip below. try: uname -a | apk add nano' });
+          'type a command, or tap a chip below. try: uname -a | apk search editor | apk add nano' });
       }
       render();
       requestAnimationFrame(() => { if (inputRef && !inputRef.disabled) inputRef.focus(); scrollTermToBottom(); });
@@ -361,6 +361,7 @@
             twChip('uname -a', 'uname -a'),
             twChip('cal', 'cal'),
             twChip('id', 'id'),
+            twChip('apk search editor', 'apk search editor'),
             twChip('apk add nano', 'apk add nano'),
             twChip('apk list', 'apk list'),
             h('button', { class:'wb-tw-chip', type:'button', onclick: clearTerm }, 'clear')

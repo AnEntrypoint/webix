@@ -89,7 +89,16 @@ export function createCli({ onLine, onStatus }){
         const rows = x.apk.list().map(p=>`${p.name}-${p.version} [${p.fileCount} files]`);
         return { stdout: (rows.join('\n') || '(no packages installed)') + '\n', stderr:'', exitCode:0 };
       }
-      return { stdout:'', stderr:`apk: unknown subcommand '${sub}' (try add|info|list)`, exitCode:1 };
+      if (sub === 'search'){
+        const query = tokens.slice(1).join(' ');
+        if (!query) return { stdout:'', stderr:'apk search: missing query', exitCode:1 };
+        const { packages, total } = await x.apk.search(query, { limit:40 });
+        if (!packages.length) return { stdout:'', stderr:`apk search: no match for '${query}' in alpine v3.21 main/community`, exitCode:1 };
+        const rows = packages.map(p=>`${p.name}-${p.version}${p.summary ? ' — '+p.summary : ''}`);
+        const suffix = total>packages.length ? `\n(${total} total matches, showing ${packages.length} — narrow the query for more)` : '';
+        return { stdout: rows.join('\n') + suffix + '\n', stderr:'', exitCode:0 };
+      }
+      return { stdout:'', stderr:`apk: unknown subcommand '${sub}' (try add|search|info|list)`, exitCode:1 };
     } catch (e){
       return { stdout:'', stderr:'apk error: '+(e?.message||e), exitCode:1 };
     }
