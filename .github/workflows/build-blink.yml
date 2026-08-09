@@ -90,11 +90,29 @@ jobs:
           EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sABORTING_MALLOC=0 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS -lnodefs.js -lidbfs.js"
           # -pthread also has to reach the C compiler (not just the linker) so
           # threading intrinsics and the pthread headers are wired in.
-          # configure's own default is CFLAGS="${CFLAGS:--g -O2}" -- exporting
-          # CFLAGS here to add -pthread means that default never applies (the
-          # env var is already non-empty), so -O2 must be added explicitly or
-          # the whole interpreter/decoder core compiles with zero optimization.
-          export CFLAGS="-pthread -O2"
+          # KNOWN, INTENTIONAL: configure's own default is
+          # CFLAGS="${CFLAGS:--g -O2}" -- exporting CFLAGS here to add -pthread
+          # means that -O2 default never applies, so the interpreter/decoder
+          # core compiles with effectively zero optimization. -O2 was tried
+          # twice (plain, and via MODE=rel's full release-flag bundle) and
+          # BOTH hung indefinitely in CI on the very first guest ELF run
+          # (host.runElf's exit-code promise never resolved -- no crash, no
+          # timeout, no error) on this emcc 3.1.69 -pthread
+          # --shared-memory --import-memory SharedArrayBuffer target (CI runs
+          # 31305991413 and 31308526123, both cancelled). Identical symptom
+          # across two very different flag sets (one adds -fno-exceptions
+          # -fno-unwind-tables -fno-align-*, the other doesn't) points at
+          # plain -O2 itself under this specific threaded emscripten target as
+          # the trigger -- most likely the optimizer reordering/eliminating
+          # something the cross-thread proxy-queue signaling
+          # (blink-core-helpers.js's waitForSlot / Module._blinkenlib_thread_done_slot)
+          # depends on. Researched for a known fix (emscripten/Blink issue
+          # trackers, "computed goto miscompile," "Atomics reordering -O2") --
+          # no documented match, no concrete safe fix found. Do NOT re-add -O2
+          # without first bisecting locally (a real emsdk toolchain, not CI)
+          # which specific pass/flag/file is responsible, or filing a minimal
+          # repro upstream against lanmower/blink or jart/blink.
+          export CFLAGS="-pthread"
           # Max practical in-browser profile: enable pipes/fork/threads/sockets
           # and the non-POSIX surface. NOJIT is mandatory (Blink's JIT only emits
           # native x86-64/aarch64, impossible under wasm32 - see jit.c). We start
@@ -102,7 +120,7 @@ jobs:
           # baseline is explicit.
           emconfigure ./configure --disable-all \
             --enable-threads --enable-sockets --enable-fork --enable-nonposix \
-            CFLAGS="-pthread -O2" \
+            CFLAGS="-pthread" \
             LDFLAGS="$EFLAGS" \
             CPPFLAGS="-DHTML -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_GNU_SOURCE -pthread"
 
@@ -162,17 +180,11 @@ jobs:
       - name: Compile (emmake make blinkenlib)
         working-directory: libblink
         run: |
-          # Plain -O2 via the CFLAGS exported above (not MODE=rel): MODE=rel
-          # also pulls in -fno-exceptions -fno-unwind-tables
-          # -fno-asynchronous-unwind-tables (build/config.mk), which hung the
-          # "Smoke test (node, hand-built ELF)" step for 60+ minutes on CI run
-          # 31305991413 (cancelled) -- plausibly because Blink emulates guest
-          # signals/traps via host unwind/exception machinery that those flags
-          # strip. -O2 alone (this workflow's own CFLAGS, no MODE) restores the
-          # optimization without touching unwind/exception codegen, matching
-          # configure's own unset-CFLAGS default of "-g -O2" (see the CFLAGS
-          # export above) while staying on the plain o//blink/... target path
-          # this workflow always used.
+          # KNOWN, INTENTIONAL: no -O2/MODE=rel here. See the CFLAGS export
+          # comment above -- both an -O2 attempt and an -O2+MODE=rel attempt
+          # hung indefinitely in CI (runs 31305991413, 31308526123). Reverted
+          # to the original unoptimized build (correct, just slow) until a
+          # local (non-CI) bisect finds the specific miscompiling flag/pass.
           emmake make o//blink/blinkenlib.js -j$(nproc)
           find o -name 'blinkenlib.wasm' -o -name 'blinkenlib.js' | xargs ls -la || true
 
