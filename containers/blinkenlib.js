@@ -8204,6 +8204,7 @@ function assignWasmImports() {
     /** @export */ invoke_iii,
     /** @export */ invoke_iiii,
     /** @export */ invoke_ji,
+    /** @export */ invoke_jiii,
     /** @export */ invoke_vi,
     /** @export */ invoke_vii,
     /** @export */ invoke_viii,
@@ -8342,26 +8343,15 @@ var dynCall_vij = Module["dynCall_vij"] = createExportWrapper("dynCall_vij", 4);
 
 var dynCall_iiji = Module["dynCall_iiji"] = createExportWrapper("dynCall_iiji", 5);
 
-var dynCall_iijiii = Module["dynCall_iijiii"] = createExportWrapper("dynCall_iijiii", 7);
-
 var dynCall_jijj = Module["dynCall_jijj"] = createExportWrapper("dynCall_jijj", 6);
 
 var dynCall_vijjj = Module["dynCall_vijjj"] = createExportWrapper("dynCall_vijjj", 8);
 
+var dynCall_jiii = Module["dynCall_jiii"] = createExportWrapper("dynCall_jiii", 4);
+
 var dynCall_jji = Module["dynCall_jji"] = createExportWrapper("dynCall_jji", 4);
 
 var dynCall_jiji = Module["dynCall_jiji"] = createExportWrapper("dynCall_jiji", 5);
-
-function invoke_viii(index, a1, a2, a3) {
-  var sp = stackSave();
-  try {
-    getWasmTableEntry(index)(a1, a2, a3);
-  } catch (e) {
-    stackRestore(sp);
-    if (e !== e + 0) throw e;
-    _setThrew(1, 0);
-  }
-}
 
 function invoke_vi(index, a1) {
   var sp = stackSave();
@@ -8374,10 +8364,10 @@ function invoke_vi(index, a1) {
   }
 }
 
-function invoke_i(index) {
+function invoke_vii(index, a1, a2) {
   var sp = stackSave();
   try {
-    return getWasmTableEntry(index)();
+    getWasmTableEntry(index)(a1, a2);
   } catch (e) {
     stackRestore(sp);
     if (e !== e + 0) throw e;
@@ -8385,10 +8375,10 @@ function invoke_i(index) {
   }
 }
 
-function invoke_vii(index, a1, a2) {
+function invoke_i(index) {
   var sp = stackSave();
   try {
-    getWasmTableEntry(index)(a1, a2);
+    return getWasmTableEntry(index)();
   } catch (e) {
     stackRestore(sp);
     if (e !== e + 0) throw e;
@@ -8429,6 +8419,17 @@ function invoke_iiii(index, a1, a2, a3) {
   }
 }
 
+function invoke_viii(index, a1, a2, a3) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1, a2, a3);
+  } catch (e) {
+    stackRestore(sp);
+    if (e !== e + 0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_viiiiii(index, a1, a2, a3, a4, a5, a6) {
   var sp = stackSave();
   try {
@@ -8455,6 +8456,17 @@ function invoke_vij(index, a1, a2, a3) {
   var sp = stackSave();
   try {
     dynCall_vij(index, a1, a2, a3);
+  } catch (e) {
+    stackRestore(sp);
+    if (e !== e + 0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_jiii(index, a1, a2, a3) {
+  var sp = stackSave();
+  try {
+    return dynCall_jiii(index, a1, a2, a3);
   } catch (e) {
     stackRestore(sp);
     if (e !== e + 0) throw e;
