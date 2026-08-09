@@ -162,17 +162,18 @@ jobs:
       - name: Compile (emmake make blinkenlib)
         working-directory: libblink
         run: |
-          # MODE=rel applies Blink's own intended release-optimization profile
-          # (build/config.mk: -O2 -mtune=generic -fno-align-functions
-          # -fno-align-jumps -fno-align-labels -fno-exceptions -fno-unwind-tables
-          # -fno-asynchronous-unwind-tables) on top of the CFLAGS exported above.
-          # Without MODE set, none of build/config.mk's MODE-gated -O additions
-          # fire and the interpreter/decoder core compiles unoptimized. The
-          # build target path must carry the SAME mode segment (o/rel/... not
-          # o//...) or make looks for the artifact under the wrong output dir
-          # and fails with "deleting o/rel/depend because of an unspecified
-          # prerequisite: o//blink/blinkenlib.js" (witnessed CI run 31304670826).
-          emmake make MODE=rel o/rel/blink/blinkenlib.js -j$(nproc)
+          # Plain -O2 via the CFLAGS exported above (not MODE=rel): MODE=rel
+          # also pulls in -fno-exceptions -fno-unwind-tables
+          # -fno-asynchronous-unwind-tables (build/config.mk), which hung the
+          # "Smoke test (node, hand-built ELF)" step for 60+ minutes on CI run
+          # 31305991413 (cancelled) -- plausibly because Blink emulates guest
+          # signals/traps via host unwind/exception machinery that those flags
+          # strip. -O2 alone (this workflow's own CFLAGS, no MODE) restores the
+          # optimization without touching unwind/exception codegen, matching
+          # configure's own unset-CFLAGS default of "-g -O2" (see the CFLAGS
+          # export above) while staying on the plain o//blink/... target path
+          # this workflow always used.
+          emmake make o//blink/blinkenlib.js -j$(nproc)
           find o -name 'blinkenlib.wasm' -o -name 'blinkenlib.js' | xargs ls -la || true
 
       - name: Stage artifacts under containers/
