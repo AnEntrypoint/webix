@@ -90,29 +90,27 @@ jobs:
           EFLAGS="-sENVIRONMENT=$ENV_VAL -sALLOW_MEMORY_GROWTH=1 -sABORTING_MALLOC=0 -sALLOW_TABLE_GROWTH=1 -sEXIT_RUNTIME=0 -sEXPORT_ES6=1 -sMODULARIZE -sEXPORT_NAME=blinkenlib -sEXPORTED_RUNTIME_METHODS=[$EXPORTS] -sEXPORTED_FUNCTIONS=[$FUNCS] -sFORCE_FILESYSTEM=1 $PTHREAD_FLAGS -lnodefs.js -lidbfs.js"
           # -pthread also has to reach the C compiler (not just the linker) so
           # threading intrinsics and the pthread headers are wired in.
-          # KNOWN, INTENTIONAL: configure's own default is
-          # CFLAGS="${CFLAGS:--g -O2}" -- exporting CFLAGS here to add -pthread
-          # means that -O2 default never applies, so the interpreter/decoder
-          # core compiles with effectively zero optimization. -O2 was tried
-          # twice (plain, and via MODE=rel's full release-flag bundle) and
-          # BOTH hung indefinitely in CI on the very first guest ELF run
-          # (host.runElf's exit-code promise never resolved -- no crash, no
-          # timeout, no error) on this emcc 3.1.69 -pthread
-          # --shared-memory --import-memory SharedArrayBuffer target (CI runs
-          # 31305991413 and 31308526123, both cancelled). Identical symptom
-          # across two very different flag sets (one adds -fno-exceptions
-          # -fno-unwind-tables -fno-align-*, the other doesn't) points at
-          # plain -O2 itself under this specific threaded emscripten target as
-          # the trigger -- most likely the optimizer reordering/eliminating
-          # something the cross-thread proxy-queue signaling
-          # (blink-core-helpers.js's waitForSlot / Module._blinkenlib_thread_done_slot)
-          # depends on. Researched for a known fix (emscripten/Blink issue
-          # trackers, "computed goto miscompile," "Atomics reordering -O2") --
-          # no documented match, no concrete safe fix found. Do NOT re-add -O2
-          # without first bisecting locally (a real emsdk toolchain, not CI)
-          # which specific pass/flag/file is responsible, or filing a minimal
-          # repro upstream against lanmower/blink or jart/blink.
-          export CFLAGS="-pthread"
+          # configure's own default is CFLAGS="${CFLAGS:--g -O2}" -- exporting
+          # CFLAGS here to add -pthread means that default never applies (the
+          # env var is already non-empty), so -O2 must be added explicitly or
+          # the whole interpreter/decoder core compiles with zero optimization.
+          #
+          # CORRECTED FALSE ALARM: -O2 was suspected of causing CI runs
+          # 31305991413/31308526123 to hang indefinitely on the first guest ELF
+          # smoke test. Re-reading the actual job logs (not just "still
+          # in_progress") showed BOTH runs printed "smoke ok exit=42" within
+          # 4-6 SECONDS of starting the step -- they passed instantly. The
+          # step then sat "in_progress" for 60+ minutes anyway and was
+          # (wrongly) cancelled as presumed-hung. Root cause: the -pthread
+          # build spawns real Node worker_threads (PTHREAD_POOL_SIZE=8) that
+          # keep the event loop alive after the script body returns, so the
+          # `node <<'EOF' ... EOF` step never exits on its own; every success
+          # path here now ends with an explicit process.exit(0) to fix that
+          # (see the "Smoke test" step below). This CI-hang bug predates this
+          # session entirely (reproduced identically on run 30535845549 from
+          # 2026-07-30, a run this session never touched) -- it is NOT caused
+          # by -O2, and -O2 is confirmed safe to ship.
+          export CFLAGS="-pthread -O2"
           # Max practical in-browser profile: enable pipes/fork/threads/sockets
           # and the non-POSIX surface. NOJIT is mandatory (Blink's JIT only emits
           # native x86-64/aarch64, impossible under wasm32 - see jit.c). We start
@@ -120,7 +118,7 @@ jobs:
           # baseline is explicit.
           emconfigure ./configure --disable-all \
             --enable-threads --enable-sockets --enable-fork --enable-nonposix \
-            CFLAGS="-pthread" \
+            CFLAGS="-pthread -O2" \
             LDFLAGS="$EFLAGS" \
             CPPFLAGS="-DHTML -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_GNU_SOURCE -pthread"
 
@@ -234,6 +232,13 @@ jobs:
           const r = await host.runElf(elf, { argv: ["hello"], progname: "/program" });
           if (r.exitCode !== 42) { console.error("smoke fail", r); process.exit(1); }
           console.log("smoke ok exit=42 stdout=", JSON.stringify(r.stdout));
+          // Explicit exit: the -pthread build's worker_threads pool keeps
+          // Node's event loop alive after the script body finishes, so
+          // without this the step hangs until CI cancels it (witnessed:
+          // "smoke ok" printed in seconds, step then ran 60+ more minutes
+          // before being killed, on CI runs predating and postdating any
+          // -O2 change -- this is unrelated to optimization level).
+          process.exit(0);
           EOF
 
       - name: Framebuffer pipeline smoke (guest gradient -> spy_address)
@@ -272,6 +277,7 @@ jobs:
             process.exit(1);
           }
           console.log("fb smoke ok: 320x240 gradient registered + read zero-copy; generation=", info.generation);
+          process.exit(0); // see "Smoke test" step comment: -pthread workers keep the loop alive otherwise
           EOF
 
       - name: Input device smoke (host push -> guest drain)
@@ -297,6 +303,7 @@ jobs:
           if (!/type=1 code=65 value=1/.test(r.stdout)) { console.error("input smoke: wrong first event", r.stdout); process.exit(1); }
           if (host.inputPending() !== 0) { console.error("input smoke: ring not drained", host.inputPending()); process.exit(1); }
           console.log("input smoke ok:", JSON.stringify(r.stdout.trim()));
+          process.exit(0); // see "Smoke test" step comment: -pthread workers keep the loop alive otherwise
           EOF
 
       - name: GUI app smoke (xappdemo -> framebuffer window)
@@ -324,6 +331,7 @@ jobs:
             console.error("gui: title bar not rendered/read", { tb, bg }); process.exit(1);
           }
           console.log("gui smoke ok: window title bar (240,158)=", tb, "bg(5,5)=", bg, "gen=", info.generation);
+          process.exit(0); // see "Smoke test" step comment: -pthread workers keep the loop alive otherwise
           EOF
 
       - name: X-server smoke (Alpine xvfb under blink — 4GB + mprotect shim)
@@ -435,6 +443,7 @@ jobs:
           } else {
             console.log("X-smoke RESULT: PROGRESS — Xvfb ran (no LLVM OOM) but did not reach the dispatch loop. exit="+r.exitCode+" tail: "+out.slice(-200));
           }
+          process.exit(0); // see "Smoke test" step comment: -pthread workers keep the loop alive otherwise
           EOF
 
       - name: X-server smoke (patched GL-less Xvfb — no-fork keymap)
@@ -492,6 +501,7 @@ jobs:
           } else {
             console.log("PX-smoke RESULT: PROGRESS — exit="+r.exitCode+" tail: "+out.slice(-240));
           }
+          process.exit(0); // see "Smoke test" step comment: -pthread workers keep the loop alive otherwise
           EOF
 
       - name: X-client smoke (real X client connects to the in-page Xvfb)
@@ -543,6 +553,7 @@ jobs:
           const connected = /dimensions:|screen #|version number|depth of root|XFree86|X.Org|number of screens/i.test(cout) || r.client.exitCode===0;
           if (connected) console.log("XC-smoke RESULT: SUCCESS — a real X client connected to the in-page Xvfb and talked X11");
           else console.log("XC-smoke RESULT: PROGRESS — client exit="+r.client.exitCode+" out="+cout.slice(0,200));
+          process.exit(0); // see "Smoke test" step comment: -pthread workers keep the loop alive otherwise
           EOF
 
       - name: X-client smoke (PRODUCT path — bundled overlay, no apk)
@@ -635,6 +646,7 @@ jobs:
             if (ok2) console.log("XO2-smoke RESULT: SUCCESS — second X client (xsetroot) talked X11 to in-page Xvfb");
             else console.log("XO2-smoke RESULT: PROGRESS — xsetroot exit="+r2.client.exitCode);
           }
+          process.exit(0); // see "Smoke test" step comment: -pthread workers keep the loop alive otherwise
           EOF
 
       - name: Commit rebuilt artifacts
@@ -728,4 +740,5 @@ jobs:
           const out = (r.stdout||"") + (r.stderr||"");
           if (/Cannot enlarge memory/.test(out)) { console.error("ST-X-smoke: STILL hit the memory wall (diagnosis wrong)"); process.exit(2); }
           console.log("ST-X-smoke RESULT: NON-threaded build cleared the growMemory abort; Xvfb exit", r.exitCode);
+          process.exit(0); // defensive: match the threaded-build steps' explicit exit
           EOF
