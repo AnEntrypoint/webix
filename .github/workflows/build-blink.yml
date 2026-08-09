@@ -167,8 +167,12 @@ jobs:
           # -fno-align-jumps -fno-align-labels -fno-exceptions -fno-unwind-tables
           # -fno-asynchronous-unwind-tables) on top of the CFLAGS exported above.
           # Without MODE set, none of build/config.mk's MODE-gated -O additions
-          # fire and the interpreter/decoder core compiles unoptimized.
-          emmake make MODE=rel o//blink/blinkenlib.js -j$(nproc)
+          # fire and the interpreter/decoder core compiles unoptimized. The
+          # build target path must carry the SAME mode segment (o/rel/... not
+          # o//...) or make looks for the artifact under the wrong output dir
+          # and fails with "deleting o/rel/depend because of an unspecified
+          # prerequisite: o//blink/blinkenlib.js" (witnessed CI run 31304670826).
+          emmake make MODE=rel o/rel/blink/blinkenlib.js -j$(nproc)
           find o -name 'blinkenlib.wasm' -o -name 'blinkenlib.js' | xargs ls -la || true
 
       - name: Stage artifacts under containers/
