@@ -122,6 +122,20 @@ jobs:
             LDFLAGS="$EFLAGS" \
             CPPFLAGS="-DHTML -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_GNU_SOURCE -pthread"
 
+      - name: Diagnose resolved optimization level (config.mk CFLAGS passthrough)
+        working-directory: libblink
+        run: |
+          # configure's own tail unconditionally writes `CFLAGS = ${CFLAGS}` to
+          # config.mk regardless of probe results (blink's configure line ~725),
+          # so the -O2 exported to `emconfigure ./configure` above should already
+          # be baked into the real build -- unlike the HAVE_* feature defines,
+          # which DO need the force-patch step below because they're gated on a
+          # compile+run probe that cannot execute wasm on this x86 runner. Log
+          # the resolved value so CI proves which is actually true instead of
+          # trusting a comment.
+          echo "== config.mk CFLAGS line (ground truth for the actual build) =="
+          grep '^CFLAGS' config.mk
+
       - name: Force feature defines (emconfigure probes cannot run wasm natively)
         working-directory: libblink
         run: |
