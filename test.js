@@ -149,6 +149,19 @@ await t("NODEFS: mount host dir, busybox cat reads it", async () => {
   assert.match(r.stdout, /1\n2\n3/);
 });
 
+await t("NODEFS: guest write-back reaches the real host filesystem", async () => {
+  const host=await createBlinkHost({});
+  if(!host.capabilities.nodefs){ console.log("(skip: NODEFS not in this wasm build)"); return }
+  const dir=os.tmpdir() + "/webix-nodefs-writeback-" + Date.now();
+  fs.mkdirSync(dir, { recursive:true });
+  host.mountNodeDir(dir, "/host");
+  const r=await race(host.runShellScript(BUSYBOX_STATIC, 'echo "hello from guest" > /host/written.txt\n'), 12000);
+  assert.equal(r.exitCode, 0);
+  const hostPath=dir + "/written.txt";
+  assert.ok(fs.existsSync(hostPath), "guest write did not appear on the real host fs at "+hostPath);
+  assert.equal(fs.readFileSync(hostPath, "utf8"), "hello from guest\n");
+});
+
 await t("sockets enabled: socket(AF_INET) no longer ENOSYS", async () => {
   // The portabox build enables --enable-sockets, so socket() is implemented.
   // nc to a closed local port fails to *connect* (no listener / no real net),
