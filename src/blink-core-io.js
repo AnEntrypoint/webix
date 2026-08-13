@@ -6,11 +6,17 @@ import { memBuffer } from "./blink-core-mem.js";
 
 const REGS=["rip","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15","rax","rbx","rcx","rdx"];
 
+const strEncoder=new TextEncoder();
+
+// Bulk Uint8Array.set() instead of a per-byte DataView loop -- also fixes a
+// latent correctness bug: charCodeAt(i) wrote raw UTF-16 code units as bytes,
+// corrupting any non-ASCII path/progname. TextEncoder produces real UTF-8.
 export function writeStr(Module,ptr,str,max){
-  const view=new DataView(memBuffer(Module));
-  const n=Math.min(str.length,max-1);
-  for(let i=0;i<n;i++) view.setUint8(ptr+i,str.charCodeAt(i));
-  view.setUint8(ptr+n,0);
+  const view=new Uint8Array(memBuffer(Module));
+  const bytes=strEncoder.encode(String(str));
+  const n=Math.min(bytes.length,max-1);
+  view.set(bytes.subarray(0,n),ptr);
+  view[ptr+n]=0;
 }
 
 // Write an argv array as a NUL-separated buffer terminated by a double NUL.
@@ -18,12 +24,13 @@ export function writeStr(Module,ptr,str,max){
 // arguments containing spaces survive (the old space-joined scheme broke
 // every multi-word arg). ARGC_MAX_LINE_LEN is 4096 in the patched build.
 export function writeArgv(Module,ptr,args,max){
-  const enc=new TextEncoder();
   const view=new Uint8Array(memBuffer(Module));
   let off=0;
   for(const a of args){
-    const bytes=enc.encode(String(a));
-    if(off+bytes.length+2>max) break; // leave room for two NULs
+    const bytes=strEncoder.encode(String(a));
+    if(off+bytes.length+2>max){
+      throw new Error(`blink-core: argv exceeds ${max}-byte buffer (arg ${JSON.stringify(String(a)).slice(0,64)} at offset ${off}) -- truncating would silently execute a different command line`);
+    }
     view.set(bytes,ptr+off); off+=bytes.length;
     view[ptr+off]=0; off++;
   }

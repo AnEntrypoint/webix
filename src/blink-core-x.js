@@ -61,5 +61,16 @@ export function createXRunner(Module, io){
     },
     stopX(){ if(xpump){ clearInterval(xpump); xpump=null; } xserverH=null; },
     xRunning(){ return !!xpump; },
+    // Tears down what a JS-side host can reach: this stops the pump above (the
+    // real leak this guards against -- a caller that starts an X server and
+    // never calls dispose()/stopX() leaks the interval and its underlying
+    // VM/worker forever) and best-effort reaps the pthread pool. Module.PThread
+    // is not in EXPORTED_RUNTIME_METHODS (build-blink.yml) yet, so
+    // terminateAllThreads is unreachable today -- optional chaining makes this
+    // call start working the moment that export lands, no further code change.
+    dispose(){
+      if(xpump){ clearInterval(xpump); xpump=null; } xserverH=null;
+      Module.PThread?.terminateAllThreads?.();
+    },
   };
 }

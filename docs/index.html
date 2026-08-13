@@ -126,6 +126,7 @@
     import { mount, components as C, h, installStyles } from 'anentrypoint-design';
     import { installWindowDebug } from './assets/x86_64-witness-bootstrap.js';
     import { createCli } from './assets/cli.js';
+    import { attachDisplay } from './assets/display.js';
 
     installStyles();
     document.documentElement.classList.add('ds-247420');
@@ -161,11 +162,15 @@
       term: [],
       cliBusy: false,
       cliInput: '',
-      copied: null
+      copied: null,
+      fbStatus: 'idle',
+      fbInfo: null
     };
 
     let cli = null;
     let inputRef = null;
+    let fbCanvasRef = null;
+    let fbController = null;
 
     function ensureCli(){
       if (cli) return cli;
@@ -265,6 +270,30 @@
       render();
     }
 
+    // v0.8.0's headline capability (a real zero-copy guest->host framebuffer)
+    // was advertised in the hero/status text but never actually demoed on this
+    // page (no canvas, no fbtest.elf, display.js not even shipped to
+    // docs/assets) -- run the same guest gradient program test.js's
+    // "framebuffer pipeline" case proves, then attach the real display.js
+    // blit loop so the page shows what it claims.
+    async function runFramebufferDemo(){
+      const x = window.__debug?.x86_64;
+      if (!x || !fbCanvasRef) return;
+      state.fbStatus = 'running'; render();
+      try {
+        const bytes = new Uint8Array(await (await fetch(ASSETS + 'fbtest.elf')).arrayBuffer());
+        const r = await x.runElf(bytes, { argv: ['fbtest'] });
+        log('fbtest.elf exit=' + r.exitCode);
+        if (!fbController) fbController = attachDisplay(x.host, fbCanvasRef, { fpsCap: 30 });
+        state.fbInfo = x.host.fbInfo();
+        state.fbStatus = 'live';
+      } catch (e) {
+        state.fbStatus = 'error';
+        log('framebuffer demo FAIL: ' + (e?.message || e));
+      }
+      render();
+    }
+
     window.__webixDemo = {
       boot, takeSnapshot, state,
       get cli(){ return ensureCli() },
@@ -316,7 +345,7 @@
           h('p', { class: 'wb-hero2-body' },
             'a real busybox shell on a blink wasm cpu - ~150 linux syscalls, real ELF, real apk. no js syscall layer. type into the terminal; it runs in this tab.'),
           h('div', { class: 'wb-chips' },
-            h('span', { class: 'wb-chip' }, '18/18 tests'),
+            h('span', { class: 'wb-chip' }, '22/22 tests'),
             h('span', { class: 'wb-chip' }, 'node + bun'),
             h('span', { class: 'wb-chip' }, 'threaded + sockets'),
             h('span', { class: 'wb-chip' }, 'sse2')
@@ -393,12 +422,36 @@
       });
     }
 
+    function framebufferPanel(){
+      const ready = state.status === 'ready' || state.status === 'running';
+      const geom = state.fbInfo ? `${state.fbInfo.width}x${state.fbInfo.height}` : '—';
+      return h('div', { id: 'framebuffer' }, C.Panel({
+        title: 'live framebuffer (zero-copy)',
+        style: 'margin:0 0 16px',
+        children: h('div', { class: 'wb-pad' },
+          h('p', { class: 'wb-card-desc', style: 'margin:0 0 10px' },
+            'a guest program (fbtest.elf) mmaps an RGBA buffer and registers it via a synthetic syscall; the host reads it back zero-copy through spy_address and blits it to this canvas on a rAF loop — the same path src/display.js and containers/fbtest.elf give any fbdev-writing program.'),
+          h('div', { class: 'wb-row', style: 'margin-bottom:8px' },
+            btn('run fbtest.elf', runFramebufferDemo, !ready || state.fbStatus === 'running'),
+            h('span', null, 'status:'), h('code', null, state.fbStatus),
+            h('span', null, 'geometry:'), h('code', null, geom)
+          ),
+          h('canvas', {
+            id: 'fb-canvas',
+            width: 320, height: 240,
+            style: 'width:100%;max-width:320px;height:auto;aspect-ratio:320/240;background:#000;border-radius:8px;border:1px solid var(--panel-border,rgba(255,255,255,.08))',
+            ref: (el) => { fbCanvasRef = el; }
+          })
+        )
+      }));
+    }
+
     function featuresPanel(){
       const items = [
         { name:'blink owns the cpu surface', desc:'~150 linux x86_64 syscalls, signals, the mmu, and instruction decode — all in the upstream blink wasm. no parallel js abi. this portabox build is threaded (pthread) and sockets-enabled; only fork/clone (no emscripten fork) stays out of scope.', meta:'host' },
         { name:'<200 lines per file',        desc:'every module under the cap. if it grows past 200L it splits before merge. forces composition over sprawl.', meta:'invariant' },
         { name:'single orchestration surface', desc:'createBlinkCore.runElf is the only run path. the earlier xstate kernel/machines wrapper over runElf was removed as unused indirection the demo and cli never exercised.', meta:'v0.8.0' },
-        { name:'node + bun first-class',     desc:'bun test.js passes 18/18 alongside node 23.10. file:// dynamic import + emscripten glue + wasm load all work in bun 1.3.8 unmodified.', meta:'parity' },
+        { name:'node + bun first-class',     desc:'bun test.js passes 22/22 alongside node 23.10. file:// dynamic import + emscripten glue + wasm load all work in bun 1.3.8 unmodified.', meta:'parity' },
         { name:'browser witnessed',          desc:'this page boots the same host the test suite uses. window.__debug.x86_64 is the contract — ready, exitCode, registers, stdout, runElf, snapshot.', meta:'live' },
         { name:'threaded + sockets, NOJIT',  desc:'sse2 verified. avx traps SIGILL. threads + AF_INET sockets on. no fork() (emscripten) so full shell pipelines are out; JIT is impossible under wasm32. fork emsdk to lift the rest.', meta:'caveat' }
       ];
@@ -469,7 +522,7 @@
 
     function header(){
       const nav = [
-        ['terminal','#cli-panel'],['witness','#demo-runner'],
+        ['terminal','#cli-panel'],['witness','#demo-runner'],['framebuffer','#framebuffer'],
         ['architecture','#architecture'],['github','https://github.com/AnEntrypoint/webix'],
         ['npm','https://www.npmjs.com/package/webix']
       ];
@@ -496,7 +549,7 @@
         h('span', { class: 'wb-foot-item wb-foot-accent' }, 'main · ' + state.status),
         h('span', { class: 'wb-foot-spread' }),
         h('span', { class: 'wb-foot-item' }, 'blink'),
-        h('span', { class: 'wb-foot-item' }, '18/18'),
+        h('span', { class: 'wb-foot-item' }, '22/22'),
         h('span', { class: 'wb-foot-item' }, exit)
       );
     }
@@ -508,6 +561,7 @@
         h('main', { class: 'wb-wrap' },
           terminalHero(),
           livePanel(),
+          framebufferPanel(),
           featuresPanel(),
           examplesPanel(),
           quickstartPanel()

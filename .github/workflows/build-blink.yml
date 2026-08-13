@@ -52,7 +52,11 @@ jobs:
         run: |
           ENV_VAL="web,worker,node"
           if [ "$WITH_NODE_ENV" = "false" ]; then ENV_VAL="web,worker"; fi
-          EXPORTS='"UTF8ToString","stringToNewUTF8","AsciiToString","FS","ENV","callMain","addFunction","wasmExports"'
+          # PThread exported so the JS host can call PThread.terminateAllThreads()
+          # for a real dispose()/teardown path -- without it, PTHREAD_POOL_SIZE=8
+          # OS worker_threads per host are unreachable from JS and leak for the
+          # process lifetime (see blink-core-x.js's dispose()).
+          EXPORTS='"UTF8ToString","stringToNewUTF8","AsciiToString","FS","ENV","callMain","addFunction","wasmExports","PThread"'
           # Explicitly export the framebuffer getters added in the portabox
           # branch so the JS host can map the guest framebuffer zero-copy.
           # (They are EMSCRIPTEN_KEEPALIVE too, but listing them here is robust
@@ -122,6 +126,20 @@ jobs:
             LDFLAGS="$EFLAGS" \
             CPPFLAGS="-DHTML -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_GNU_SOURCE -pthread"
 
+      - name: Diagnose resolved optimization level (config.mk CFLAGS passthrough)
+        working-directory: libblink
+        run: |
+          # configure's own tail unconditionally writes `CFLAGS = ${CFLAGS}` to
+          # config.mk regardless of probe results (blink's configure line ~725),
+          # so the -O2 exported to `emconfigure ./configure` above should already
+          # be baked into the real build -- unlike the HAVE_* feature defines,
+          # which DO need the force-patch step below because they're gated on a
+          # compile+run probe that cannot execute wasm on this x86 runner. Log
+          # the resolved value so CI proves which is actually true instead of
+          # trusting a comment.
+          echo "== config.mk CFLAGS line (ground truth for the actual build) =="
+          grep '^CFLAGS' config.mk
+
       - name: Force feature defines (emconfigure probes cannot run wasm natively)
         working-directory: libblink
         run: |
@@ -178,11 +196,21 @@ jobs:
       - name: Compile (emmake make blinkenlib)
         working-directory: libblink
         run: |
-          # KNOWN, INTENTIONAL: no -O2/MODE=rel here. See the CFLAGS export
-          # comment above -- both an -O2 attempt and an -O2+MODE=rel attempt
-          # hung indefinitely in CI (runs 31305991413, 31308526123). Reverted
-          # to the original unoptimized build (correct, just slow) until a
-          # local (non-CI) bisect finds the specific miscompiling flag/pass.
+          # STALE-COMMENT CORRECTION (verified live, run 31704224778): this
+          # step does NOT need to pass CFLAGS/MODE=rel itself -- blink's own
+          # configure script unconditionally writes `CFLAGS = ${CFLAGS}` to
+          # config.mk regardless of probe results (configure line ~725), so
+          # the earlier Configure step's `CFLAGS="-pthread -O2"` already
+          # reaches this compile. The "Diagnose resolved optimization level"
+          # step above confirmed `CFLAGS = -pthread -O2` in the real
+          # config.mk. The old claim here ("reverted to the original
+          # unoptimized build... until a local bisect") was wrong: runs
+          # 31305991413/31308526123 hung on the CI-worker-thread-keeps-event-
+          # loop-alive bug (fixed by explicit process.exit(0) in the smoke
+          # test below, run 31310478888), NOT on -O2 itself -- nobody
+          # re-verified that after the real fix landed, so the shipped
+          # blinkenlib.wasm has actually been -O2 all along. No MODE=rel or
+          # redundant CFLAGS override needed here.
           emmake make o//blink/blinkenlib.js -j$(nproc)
           find o -name 'blinkenlib.wasm' -o -name 'blinkenlib.js' | xargs ls -la || true
 
@@ -509,8 +537,17 @@ jobs:
         run: |
           # THE x-apps-work witness: run the patched Xvfb AND a real X client
           # (xdpyinfo / xsetroot — no keyboard needed) CONCURRENTLY in one blink
-          # instance via runConcurrent, so the client connects over the in-process
-          # AF_UNIX socket and talks the X protocol to the server.
+          # instance via startXServer+launchXClient, so the client connects over
+          # the in-process AF_UNIX socket and talks the X protocol to the server.
+          #
+          # STALE-API CORRECTION (verified live, run 31704224778): this step
+          # previously called `host.runConcurrent(...)`, which does not exist on
+          # the current blink-core -- blink-core-x.js's createXRunner was added
+          # under the names startXServer/launchXClient and this CI script was
+          # never updated. The `typeof host.runConcurrent !== "function"` guard
+          # made this silently exit 0 ("runConcurrent missing (old blink-core)")
+          # every run without ever booting Xvfb or a client, while still showing
+          # green in the Actions UI. Rewritten to call the real current API.
           test -f containers/Xvfb-patched || { echo "no patched Xvfb"; exit 0; }
           node --experimental-vm-modules --no-warnings <<'EOF'
           globalThis.self ??= globalThis;
@@ -537,23 +574,22 @@ jobs:
             }
           }
           const clientPath = FS.analyzePath("/usr/bin/xdpyinfo").exists ? "/usr/bin/xdpyinfo" : "/usr/bin/xsetroot";
-          const clientArgv = clientPath.endsWith("xdpyinfo") ? [] : ["-solid","blue"];
+          const clientArgv = clientPath.endsWith("xdpyinfo") ? ["-display",":99"] : ["-display",":99","-solid","blue"];
           console.log("XC-smoke: server=/usr/bin/Xvfb client="+clientPath+" "+JSON.stringify(clientArgv));
-          if (typeof host.runConcurrent !== "function") { console.log("XC-smoke: runConcurrent missing (old blink-core)"); process.exit(0); }
-          const r = await host.runConcurrent(
-            FS.readFile("/usr/bin/Xvfb"), FS.readFile(clientPath),
-            { serverArgv: [":99","-screen","0","640x480x16","-ac","-noreset","-nolock"],
-              clientProgname: clientPath,
-              clientArgv: clientPath.endsWith("xdpyinfo") ? ["-display",":99"] : ["-display",":99","-solid","blue"],
-              clientDelayMs: 6000, overallTimeoutMs: 120000 });
-          console.log("XC-smoke server exit:", r.server.exitCode);
-          console.log("XC-smoke client exit:", r.client.exitCode);
-          console.log("XC-smoke client stdout:", JSON.stringify((r.client.stdout||"").slice(0,2000)));
-          const cout = (r.client.stdout||"")+(r.client.stderr||"");
-          const connected = /dimensions:|screen #|version number|depth of root|XFree86|X.Org|number of screens/i.test(cout) || r.client.exitCode===0;
-          if (connected) console.log("XC-smoke RESULT: SUCCESS — a real X client connected to the in-page Xvfb and talked X11");
-          else console.log("XC-smoke RESULT: PROGRESS — client exit="+r.client.exitCode+" out="+cout.slice(0,200));
-          process.exit(0); // see "Smoke test" step comment: -pthread workers keep the loop alive otherwise
+          if (typeof host.startXServer !== "function" || typeof host.launchXClient !== "function") {
+            console.log("XC-smoke: startXServer/launchXClient missing"); process.exit(1);
+          }
+          await host.startXServer(FS.readFile("/usr/bin/Xvfb"), { argv: [":99","-screen","0","640x480x16","-ac","-noreset","-nolock"] });
+          await new Promise(r => setTimeout(r, 6000)); // let the server reach its dispatch loop before connecting
+          const c = await host.launchXClient(FS.readFile(clientPath), { progname: clientPath, argv: clientArgv, timeoutMs: 60000 });
+          host.dispose();
+          console.log("XC-smoke client exit:", c.exitCode, "timedOut:", c.timedOut);
+          console.log("XC-smoke client stdout:", JSON.stringify((c.stdout||"").slice(0,2000)));
+          console.log("XC-smoke client stderr:", JSON.stringify((c.stderr||"").slice(-1200)));
+          const cout = (c.stdout||"")+(c.stderr||"");
+          const connected = /dimensions:|screen #|version number|depth of root|XFree86|X.Org|number of screens/i.test(cout) || c.exitCode===0;
+          if (connected) { console.log("XC-smoke RESULT: SUCCESS — a real X client connected to the in-page Xvfb and talked X11"); process.exit(0); }
+          console.log("XC-smoke RESULT: FAIL — client exit="+c.exitCode+" out="+cout.slice(0,200)); process.exit(1);
           EOF
 
       - name: X-client smoke (PRODUCT path — bundled overlay, no apk)
@@ -565,86 +601,92 @@ jobs:
           // Mirrors how sandcastle runs X in-page: NO apk fetch — layer the
           // bundled x-client-overlay.tar.gz (xdpyinfo + xsetroot + musl .so
           // closure) into the guest FS, place Xvfb + server.xkm, then
-          // runConcurrent. Proves the product's offline path, not just CI apk.
+          // startXServer+launchXClient. Proves the product's offline path, not
+          // just CI apk.
+          //
+          // STALE-API CORRECTION (verified live, run 31704224778): this step
+          // previously called the removed `host.runConcurrent(...)` and threw
+          // "TypeError: host.runConcurrent is not a function", which
+          // `continue-on-error: true` masked as a green step. Rewritten to call
+          // the real current startXServer/launchXClient API (see the XC-smoke
+          // step above for the same correction).
           globalThis.self ??= globalThis;
           const fs = await import("node:fs");
           const zlib = await import("node:zlib");
           const { createBlinkHost } = await import("./src/x86_64-blink.js");
-          const host = await createBlinkHost({});
-          host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
-          const FS = host.Module.FS;
-          // Untar in JS into the guest MEMFS (gunzip host-side; overlay is
-          // symlink-free). Robust to GNU base-256 sizes + PAX/long-name headers,
-          // which busybox tar chokes on under blink. Mirrors sandcastle's
-          // in-browser untar.
-          const tarBuf = zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz"));
-          const str=(o,l)=>Buffer.from(tarBuf.subarray(o,o+l)).toString("utf8").replace(/\0.*$/,"");
-          const size=(o)=>{ // octal, or GNU base-256 when high bit of first byte set
-            if(tarBuf[o]&0x80){ let n=0; for(let i=o+1;i<o+12;i++) n=n*256+tarBuf[i]; return n; }
-            return parseInt(str(o,12).trim()||"0",8); };
-          const mkdirp=(p)=>{let c="";for(const s of p.split("/").filter(Boolean)){c+="/"+s;try{FS.mkdir(c);}catch(e){}}};
-          let off=0, made=0, pending=null, zeros=0;
-          while(off+512<=tarBuf.length){
-            // Two consecutive zero blocks => end of archive.
-            let allZero=true; for(let i=0;i<512;i++){ if(tarBuf[off+i]!==0){allZero=false;break;} }
-            if(allZero){ if(++zeros>=2) break; off+=512; continue; } zeros=0;
-            let name=str(off,100);
-            const sz=size(off+124), type=String.fromCharCode(tarBuf[off+156]||48);
-            const body=tarBuf.subarray(off+512,off+512+sz);
-            const adv=512+Math.ceil(sz/512)*512;
-            if(type==="L"){ pending=Buffer.from(body).toString("utf8").replace(/\0.*$/,""); off+=adv; continue; }
-            if(type==="x"||type==="g"){ const m=Buffer.from(body).toString("utf8").match(/\d+ path=([^\n]+)\n/); if(m) pending=m[1]; off+=adv; continue; }
-            const prefix=str(off+345,155);
-            if(pending){ name=pending; pending=null; } else if(prefix){ name=prefix+"/"+name; }
-            off+=adv;
-            if(!name) continue;
-            const gp="/"+name.replace(/^\.?\/*/,"").replace(/\/$/,"");
-            if(type==="5"){ mkdirp(gp); }
-            else if(type==="0"||type==="\0"||type==="7"){ mkdirp(gp.replace(/\/[^/]*$/,"")); try{FS.writeFile(gp,new Uint8Array(body));FS.chmod(gp,0o755);made++;}catch(e){console.error("w",gp,e&&e.message);} }
-          }
-          console.log("XO-smoke overlay extract: files="+made);
-          console.log("XO-smoke fs check xdpyinfo:", FS.analyzePath("/usr/bin/xdpyinfo").exists,
-            "libX11:", FS.analyzePath("/usr/lib/libX11.so.6").exists,
-            "pixman:", FS.analyzePath("/usr/lib/libpixman-1.so.0").exists,
-            "ldmusl:", FS.analyzePath("/lib/ld-musl-x86_64.so.1").exists);
-          FS.writeFile("/usr/bin/Xvfb", fs.readFileSync("containers/Xvfb-patched")); try { FS.chmod("/usr/bin/Xvfb",0o755); } catch(e) {}
-          const xkm = fs.readFileSync("containers/server.xkm");
-          { const mkd=(p)=>{let c="";for(const s of p.split("/").filter(Boolean)){c+="/"+s;try{FS.mkdir(c);}catch(e){}}};
+
+          async function bootXHost(){
+            const host = await createBlinkHost({});
+            host.mountTarBytes(zlib.gunzipSync(fs.readFileSync("containers/alpine-minirootfs-x86_64.tar.gz")));
+            const FS = host.Module.FS;
+            // Untar in JS into the guest MEMFS (gunzip host-side; overlay is
+            // symlink-free). Robust to GNU base-256 sizes + PAX/long-name headers,
+            // which busybox tar chokes on under blink. Mirrors sandcastle's
+            // in-browser untar.
+            const tarBuf = zlib.gunzipSync(fs.readFileSync("containers/x-client-overlay.tar.gz"));
+            const str=(o,l)=>Buffer.from(tarBuf.subarray(o,o+l)).toString("utf8").replace(/\0.*$/,"");
+            const size=(o)=>{ // octal, or GNU base-256 when high bit of first byte set
+              if(tarBuf[o]&0x80){ let n=0; for(let i=o+1;i<o+12;i++) n=n*256+tarBuf[i]; return n; }
+              return parseInt(str(o,12).trim()||"0",8); };
+            const mkdirp=(p)=>{let c="";for(const s of p.split("/").filter(Boolean)){c+="/"+s;try{FS.mkdir(c);}catch(e){}}};
+            let off=0, made=0, pending=null, zeros=0;
+            while(off+512<=tarBuf.length){
+              let allZero=true; for(let i=0;i<512;i++){ if(tarBuf[off+i]!==0){allZero=false;break;} }
+              if(allZero){ if(++zeros>=2) break; off+=512; continue; } zeros=0;
+              let name=str(off,100);
+              const sz=size(off+124), type=String.fromCharCode(tarBuf[off+156]||48);
+              const body=tarBuf.subarray(off+512,off+512+sz);
+              const adv=512+Math.ceil(sz/512)*512;
+              if(type==="L"){ pending=Buffer.from(body).toString("utf8").replace(/\0.*$/,""); off+=adv; continue; }
+              if(type==="x"||type==="g"){ const m=Buffer.from(body).toString("utf8").match(/\d+ path=([^\n]+)\n/); if(m) pending=m[1]; off+=adv; continue; }
+              const prefix=str(off+345,155);
+              if(pending){ name=pending; pending=null; } else if(prefix){ name=prefix+"/"+name; }
+              off+=adv;
+              if(!name) continue;
+              const gp="/"+name.replace(/^\.?\/*/,"").replace(/\/$/,"");
+              if(type==="5"){ mkdirp(gp); }
+              else if(type==="0"||type==="\0"||type==="7"){ mkdirp(gp.replace(/\/[^/]*$/,"")); try{FS.writeFile(gp,new Uint8Array(body));FS.chmod(gp,0o755);made++;}catch(e){console.error("w",gp,e&&e.message);} }
+            }
+            console.log("XO-smoke overlay extract: files="+made);
+            FS.writeFile("/usr/bin/Xvfb", fs.readFileSync("containers/Xvfb-patched")); try { FS.chmod("/usr/bin/Xvfb",0o755); } catch(e) {}
+            const xkm = fs.readFileSync("containers/server.xkm");
+            const mkd=(p)=>{let c="";for(const s of p.split("/").filter(Boolean)){c+="/"+s;try{FS.mkdir(c);}catch(e){}}};
             mkd("/tmp/.X11-unix"); mkd("/var/lib/xkb"); mkd("/usr/share/X11/xkb/compiled");
             for (const d of ["/tmp","/var/lib/xkb","/usr/share/X11/xkb/compiled",""]) {
               for (const n of ["server-99.xkm","server-98.xkm","server-0.xkm"]) {
                 try { FS.writeFile(d+"/"+n, xkm); } catch(e) {}
               }
             }
+            return { host, FS };
           }
-          if (!FS.analyzePath("/usr/bin/xdpyinfo").exists) { console.log("XO-smoke: overlay missing xdpyinfo"); process.exit(1); }
-          console.log("XO-smoke: bundled overlay laid in; running Xvfb + xdpyinfo");
-          const r = await host.runConcurrent(
-            FS.readFile("/usr/bin/Xvfb"), FS.readFile("/usr/bin/xdpyinfo"),
-            { serverArgv: [":99","-screen","0","640x480x16","-ac","-noreset","-nolock"],
-              clientProgname: "/usr/bin/xdpyinfo", clientArgv: ["-display",":99"],
-              clientDelayMs: 4000, overallTimeoutMs: 90000 });
-          console.log("XO-smoke client exit:", r.client.exitCode);
-          console.log("XO-smoke client stdout:", JSON.stringify((r.client.stdout||"").slice(0,1500)));
-          console.log("XO-smoke client stderr:", JSON.stringify((r.client.stderr||"").slice(-1200)));
-          const cout = (r.client.stdout||"")+(r.client.stderr||"");
-          const ok = /number of screens|dimensions:|X\.Org/i.test(cout) || r.client.exitCode===0;
+
+          async function runXClient(displayArgs, clientPath, clientArgv, label){
+            const { host, FS } = await bootXHost();
+            if (!FS.analyzePath(clientPath).exists) { console.log(label+": overlay missing "+clientPath); return { ok:false }; }
+            await host.startXServer(FS.readFile("/usr/bin/Xvfb"), { argv: [...displayArgs,"-screen","0","640x480x16","-ac","-noreset","-nolock"] });
+            await new Promise(r => setTimeout(r, 4000));
+            const c = await host.launchXClient(FS.readFile(clientPath), { progname: clientPath, argv: clientArgv, timeoutMs: 60000 });
+            host.dispose();
+            console.log(label+" exit:", c.exitCode, "timedOut:", c.timedOut);
+            console.log(label+" stdout:", JSON.stringify((c.stdout||"").slice(0,1500)));
+            console.log(label+" stderr:", JSON.stringify((c.stderr||"").slice(-1200)));
+            return { ok:true, exitCode:c.exitCode, out:(c.stdout||"")+(c.stderr||"") };
+          }
+
+          const r1 = await runXClient([":99"], "/usr/bin/xdpyinfo", ["-display",":99"], "XO-smoke");
+          if (!r1.ok) { console.log("XO-smoke RESULT: FAIL — overlay missing xdpyinfo"); process.exit(1); }
+          const ok = /number of screens|dimensions:|X\.Org/i.test(r1.out) || r1.exitCode===0;
           if (ok) console.log("XO-smoke RESULT: SUCCESS — bundled (offline) X client talked X11 to in-page Xvfb");
-          else { console.log("XO-smoke RESULT: FAIL exit="+r.client.exitCode); process.exit(1); }
-          // SECOND CLIENT: prove the X path is client-general (not xdpyinfo-only).
-          // xsetroot -solid sets the root window background; exit 0 = it connected
-          // + completed an X request against a fresh in-page Xvfb.
-          if (FS.analyzePath("/usr/bin/xsetroot").exists) {
-            const r2 = await host.runConcurrent(
-              FS.readFile("/usr/bin/Xvfb"), FS.readFile("/usr/bin/xsetroot"),
-              { serverArgv: [":98","-screen","0","640x480x16","-ac","-noreset","-nolock"],
-                clientProgname: "/usr/bin/xsetroot", clientArgv: ["-display",":98","-solid","blue"],
-                clientDelayMs: 4000, overallTimeoutMs: 90000 });
-            console.log("XO2-smoke xsetroot exit:", r2.client.exitCode,
-              "stderr:", JSON.stringify((r2.client.stderr||"").slice(-300)));
-            const ok2 = r2.client.exitCode===0 && !/unable to open display/i.test((r2.client.stdout||"")+(r2.client.stderr||""));
+          else { console.log("XO-smoke RESULT: FAIL exit="+r1.exitCode); process.exit(1); }
+
+          // SECOND CLIENT, fresh host+display: prove the X path is
+          // client-general (not xdpyinfo-only). xsetroot -solid sets the root
+          // window background; exit 0 = it connected + completed an X request.
+          const r2 = await runXClient([":98"], "/usr/bin/xsetroot", ["-display",":98","-solid","blue"], "XO2-smoke");
+          if (r2.ok) {
+            const ok2 = r2.exitCode===0 && !/unable to open display/i.test(r2.out);
             if (ok2) console.log("XO2-smoke RESULT: SUCCESS — second X client (xsetroot) talked X11 to in-page Xvfb");
-            else console.log("XO2-smoke RESULT: PROGRESS — xsetroot exit="+r2.client.exitCode);
+            else console.log("XO2-smoke RESULT: PROGRESS — xsetroot exit="+r2.exitCode);
           }
           process.exit(0); // see "Smoke test" step comment: -pthread workers keep the loop alive otherwise
           EOF

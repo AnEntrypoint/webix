@@ -68,7 +68,7 @@ The vendored `containers/blinkenlib.wasm` (sha 3b9351bb7d1c, lanmower/blink
 @libblink-portabox, CI run 26594035720) is a **threaded, sockets-enabled,
 framebuffer-capable** build. This SUPERSEDES the NOSOCK / single-threaded /
 no-framebuffer / argv-space-joined / pipe=EBADF claims in the older sections
-below (kept for history). Current reality, witnessed by `test.js` 18/18:
+below (kept for history). Current reality, witnessed by `test.js` 22/22:
 
 - **Threads ON.** Built `-pthread` with `--shared-memory --import-memory`
   + `-sPTHREAD_POOL_SIZE=8`. The WASM memory is shared/imported, so read the
@@ -170,9 +170,11 @@ then and is now RESOLVED:
 - **Port 8765 is frequently squatted** on the dev box by a background
   `python -m http.server`. Use 9123 (or any other free port) for the
   static-server step in the browser witness flow.
-- **Bun parity.** `bun test.js` passes 11/11 alongside Node 23.10.0 —
-  file:// dynamic import + emscripten glue + wasm load all work in Bun
-  1.3.8 without modification. Both runtimes are first-class for tests.
+- **Bun parity [SUPERSEDED, see "Bun regression under the threaded build"
+  below].** `bun test.js` passes 11/11 alongside Node 23.10.0 — file://
+  dynamic import + emscripten glue + wasm load all work in Bun 1.3.8
+  without modification. This held for the pre-v0.8.0 single-threaded
+  build; it does NOT hold for the current -pthread build.
 
 ## gh-pages demo (docs/)
 
@@ -467,5 +469,86 @@ then commit. `COMPONENT_API.md` in that repo documents the real contracts
   </span><span class=copy>copy</span></div>` — the `.copy` is a static span.
   To make copy work, wrap `Install` in a div with `onclick` that checks
   `e.target.closest('.copy')` and copies/sets state yourself.
+
+## X server / X client under blink is real and CI-tested, but undocumented until now
+
+A substantial capability shipped without ever being written up here: a
+patched GL-less `Xvfb` runs persistently inside the wasm host, and real X
+clients (`xdpyinfo`, `xsetroot`, `xappdemo`) connect to it. This is separate
+from (and layered on top of) the framebuffer pipeline in the CAPABILITY
+UPDATE section above.
+
+- **`.github/workflows/xorg-patched-build.yml`** builds a GL-less patched
+  `Xvfb` from Xorg source (musl static, no-fork keymap loading) and a
+  bundled X-client-library overlay, committing three artifacts:
+  `containers/Xvfb-patched` (the server ELF), `containers/server.xkm` (a
+  precompiled keymap — `RunXkbComp` is patched out since blink has no
+  fork()), and `containers/x-client-overlay.tar.gz` (xdpyinfo/xsetroot/
+  libX11/libxcb/pixman/etc., ~7.6MB). These are load-bearing CI fixtures,
+  not dead weight — do not remove them without also removing the smoke
+  tests below.
+- **`build-blink.yml`'s smoke-test steps prove less than their green
+  checkmarks suggest — verify from the real log, not the Actions UI.**
+  Four steps exist: X-smoke and PX-smoke (server-alone, via `host.runElf`
+  directly) genuinely run and are real. XC-smoke ("real X client
+  connects") and XO-smoke ("PRODUCT path") were BROKEN from the
+  `blink-core-x.js` refactor (old code called a `host.runConcurrent(...)`
+  that no longer exists) until this was caught and fixed — before the fix,
+  XC-smoke printed "runConcurrent missing (old blink-core)" and silently
+  exited 0 (never booted anything, still green), and XO-smoke threw
+  `TypeError: host.runConcurrent is not a function` and exited 1, masked
+  green by `continue-on-error: true`. Both now call the real
+  `startXServer`/`launchXClient` API. `continue-on-error: true` on all
+  four X-smoke steps means a REAL regression in any of them still shows
+  green in the Actions UI — read the step log, not the checkmark, before
+  trusting an "X works" claim from this workflow.
+- **The JS-side surface is `src/blink-core-x.js`** (`createXRunner`):
+  `startXServer(serverBytes)` boots Xvfb onto thread-slot 0 with an
+  always-on `setInterval` proxy pump; `launchXClient(clientBytes)` runs a
+  client against it on slot 1 and resolves on that client's exit while the
+  server keeps serving; `dispose()`/`stopX()` tear the pump down.
+  `containers/xappdemo.elf` is the render-once in-guest GUI app this
+  drives (draggable window -> framebuffer; the host re-runs it per
+  animation tick since `runElf` is synchronous).
+- **Not yet wired into `test.js` or the gh-pages demo.** The X-server path
+  is proven only by `build-blink.yml`'s own CI smoke steps and by direct
+  `startXServer`/`launchXClient` calls — no `t()` case in `test.js`
+  exercises it, and `docs/index.html` has no X-client demo panel (the
+  framebuffer panel added alongside this note demos the lower-level
+  zero-copy framebuffer, not a live X session).
+
+## Bun regression under the threaded build (found live, adding CI coverage)
+
+The "Bun parity" claim above (11/11, Bun 1.3.8, pre-v0.8.0) was never
+re-verified against the current `-pthread`/`PTHREAD_POOL_SIZE=8` build
+before `.github/workflows/test.yml` gained a `bun test.js` job. Running it
+locally first (Bun 1.3.11) caught a real regression before it shipped as a
+false claim:
+
+- **15/22 pass; 2 fail with "Worker has been terminated"; 5 more cascade-
+  fail with "Out of memory" afterward.** `hand-built hello-x86_64` (a
+  single `runElf` call) passes; `musl-static busybox: echo + uname + expr`
+  (multiple sequential `runElf` calls on one host, which routes the 2nd+
+  call through blink-core.js's thread-slot re-entrancy path per its
+  RE-ENTRANCY comment) fails with a worker termination, and `alpine
+  /bin/busybox + apk` (same pattern) fails the same way.
+- **The OOM cascade is consistent with the pthread-pool leak this session
+  already found and partially fixed** (see `blink-core-host-dispose-api`):
+  each `createBlinkHost` spins up 8 real worker threads with no teardown
+  between test.js's ~20 host instantiations; Node evidently tolerates the
+  accumulation within one run, Bun's worker_threads implementation does
+  not, and the crashed-but-unreaped workers from the two failed tests
+  above appear to compound it.
+- **Root cause is inside Bun's own worker_threads/shared-WebAssembly.Memory
+  handling, not (as far as diagnosed) webix's own code** — the crash trace
+  is `blinkenlib.js:1015 receiveInstance -> assert -> abort` during a
+  second worker's wasm instantiation message, a path Node's worker_threads
+  handles without incident on the identical glue and wasm bytes. A full
+  fix would need a Bun-side or upstream-emscripten-glue investigation
+  disproportionate to this pass; the CI job added alongside this note
+  (`test-bun` in `test.yml`) is deliberately `continue-on-error: true` so
+  the regression is a visible, tracked canary rather than a silent claim
+  or a hard CI gate — do not flip it to blocking until this is actually
+  fixed, and do not restate "Bun parity" as current until it passes clean.
 
 @.gm/next-step.md

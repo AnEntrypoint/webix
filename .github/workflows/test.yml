@@ -26,3 +26,19 @@ jobs:
       - run: npm ci
       - name: Run test.js
         run: node test.js
+
+  # KNOWN REGRESSION, see AGENTS.md "Bun regression under the threaded
+  # build": bun test.js currently fails 7/22 (2 worker-termination + 5 OOM
+  # cascade) under the -pthread build. continue-on-error is deliberate --
+  # this job is a tracked canary for that regression, not a hard gate. Do
+  # NOT remove continue-on-error until the regression is actually fixed.
+  test-bun:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Run test.js under bun
+        run: bun test.js

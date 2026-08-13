@@ -6,6 +6,7 @@ import { parseELF64 } from "./src/elf.js";
 import { architectures, x86_64, i386 } from "./src/arch.js";
 import { createBlinkHost } from "./src/x86_64-blink.js";
 import { createApk } from "./src/alpine-apk.js";
+import { mkdirp } from "./src/apk-format.js";
 
 // Build a minimal gzipped .apk (tar.gz) in-memory: a .PKGINFO member + one file.
 function tarHeader(name, size, type="0", mode=0o644){
@@ -47,6 +48,36 @@ let pass=0, fail=0;
 async function t(name, fn){
   try{ await fn(); console.log("PASS", name); pass++ }
   catch(e){ console.log("FAIL", name, e.message); fail++ }
+}
+
+// GNU base-256-size + PAX/long-name-safe tar walker, ported from
+// build-blink.yml's XO-smoke step (the plain octal-only parseTar in
+// apk-format.js silently mis-decodes this overlay's GNU extensions).
+function untarOverlay(FS, tarBuf){
+  const str=(o,l)=>Buffer.from(tarBuf.subarray(o,o+l)).toString("utf8").replace(/\0.*$/,"");
+  const size=(o)=>{
+    if(tarBuf[o]&0x80){ let n=0; for(let i=o+1;i<o+12;i++) n=n*256+tarBuf[i]; return n; }
+    return parseInt(str(o,12).trim()||"0",8);
+  };
+  let off=0, made=0, pending=null, zeros=0;
+  while(off+512<=tarBuf.length){
+    let allZero=true; for(let i=0;i<512;i++){ if(tarBuf[off+i]!==0){allZero=false;break} }
+    if(allZero){ if(++zeros>=2) break; off+=512; continue } zeros=0;
+    let name=str(off,100);
+    const sz=size(off+124), type=String.fromCharCode(tarBuf[off+156]||48);
+    const body=tarBuf.subarray(off+512,off+512+sz);
+    const adv=512+Math.ceil(sz/512)*512;
+    if(type==="L"){ pending=Buffer.from(body).toString("utf8").replace(/\0.*$/,""); off+=adv; continue }
+    if(type==="x"||type==="g"){ const m=Buffer.from(body).toString("utf8").match(/\d+ path=([^\n]+)\n/); if(m) pending=m[1]; off+=adv; continue }
+    const prefix=str(off+345,155);
+    if(pending){ name=pending; pending=null } else if(prefix){ name=prefix+"/"+name }
+    off+=adv;
+    if(!name) continue;
+    const gp="/"+name.replace(/^\.?\/*/,"").replace(/\/$/,"");
+    if(type==="5"){ mkdirp(FS,gp) }
+    else if(type==="0"||type==="\0"||type==="7"){ mkdirp(FS,gp.replace(/\/[^/]*$/,"")); try{ FS.writeFile(gp,new Uint8Array(body)); FS.chmod(gp,0o755); made++ }catch(_){} }
+  }
+  return made;
 }
 
 await t("ELF64 parse + arch dispatch", async () => {
@@ -282,6 +313,61 @@ await t("createApk: info + list reflect installed packages", async () => {
   assert.equal(apk.info("pkg-a").version, "0.1");
   assert.equal(apk.list().length, 2);
   assert.equal(apk.list().find(p=>p.name==="pkg-b").version, "0.2");
+});
+
+await t("createApk: remove unlinks files + drops db entry", async () => {
+  const host=await alpineHost();
+  const apk=createApk(host);
+  await apk.addBytes(makeApk("removable", "1.0", [["opt/removable/f", "x"]]));
+  assert.equal(apk.isInstalled("removable"), true);
+  const res=apk.remove("removable");
+  assert.equal(res.removed, true);
+  assert.equal(apk.isInstalled("removable"), false);
+  assert.throws(() => host.Module.FS.readFile("/opt/removable/f"));
+  const db=Buffer.from(host.Module.FS.readFile("/lib/apk/db/installed")).toString();
+  assert.doesNotMatch(db, /P:removable/);
+});
+
+await t("dispose(): tears down X pump + reaches PThread.terminateAllThreads when exported", async () => {
+  const host=await createBlinkHost({});
+  assert.equal(typeof host.dispose, "function");
+  host.dispose(); // no X server running yet -- must be a safe no-op
+  assert.equal(host.xRunning(), false);
+  if(typeof host.Module.PThread?.terminateAllThreads === "function"){
+    // exported build: confirm dispose() doesn't throw when it reaches the real teardown
+    host.dispose();
+  } else {
+    console.log("(note: PThread not exported by this local wasm build; dispose() still safe)");
+  }
+});
+
+await t("persistent X-server model: startXServer + launchXClient, real client talks X11", async () => {
+  // Mirrors build-blink.yml's XO-smoke step (bundled overlay, no apk/network):
+  // boot the patched GL-less Xvfb persistently, then run a real X client
+  // (xdpyinfo) against it via the current startXServer/launchXClient API.
+  // Gracefully skips when the CI-only X-server artifacts aren't present in
+  // this checkout (they are build-blink.yml outputs, not committed source).
+  const need=["containers/Xvfb-patched","containers/server.xkm","containers/x-client-overlay.tar.gz"];
+  if(need.some(p=>!fs.existsSync(p))){ console.log("(skip: X-server artifacts not built locally)"); return }
+  const host=await alpineHost();
+  const FS=host.Module.FS;
+  const made=untarOverlay(FS, zlib.gunzipSync(blob("containers/x-client-overlay.tar.gz")));
+  assert.ok(made>0, "overlay should extract at least one file");
+  if(!FS.analyzePath("/usr/bin/xdpyinfo").exists){ console.log("(skip: overlay missing xdpyinfo)"); return }
+  FS.writeFile("/usr/bin/Xvfb", blob("containers/Xvfb-patched")); FS.chmod("/usr/bin/Xvfb", 0o755);
+  const xkm=blob("containers/server.xkm");
+  for(const d of ["/tmp","/var/lib/xkb","/usr/share/X11/xkb/compiled",""]){
+    mkdirp(FS, d);
+    for(const n of ["server-99.xkm","server-98.xkm","server-0.xkm"]) try{ FS.writeFile(d+"/"+n, xkm) }catch(_){}
+  }
+  await host.startXServer(FS.readFile("/usr/bin/Xvfb"), { argv:[":99","-screen","0","640x480x16","-ac","-noreset","-nolock"] });
+  assert.equal(host.xRunning(), true);
+  await new Promise(r=>setTimeout(r, 4000)); // let the server reach its dispatch loop
+  const c=await race(host.launchXClient(FS.readFile("/usr/bin/xdpyinfo"), { progname:"/usr/bin/xdpyinfo", argv:["-display",":99"], timeoutMs:30000 }), 35000);
+  host.dispose();
+  assert.equal(host.xRunning(), false);
+  const cout=(c.stdout||"")+(c.stderr||"");
+  assert.ok(/number of screens|dimensions:|X\.Org/i.test(cout) || c.exitCode===0, "xdpyinfo should talk X11 to the in-page Xvfb: "+cout.slice(0,300));
 });
 
 console.log(`\nresult: ${pass} pass, ${fail} fail`);

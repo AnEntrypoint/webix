@@ -57,7 +57,10 @@
     "./blink-browser": "./src/x86_64-blink-browser.js",
     "./blink-core": "./src/blink-core.js",
     "./display": "./src/display.js",
-    "./alpine-apk": "./src/alpine-apk.js"
+    "./alpine-apk": "./src/alpine-apk.js",
+    "./apk-repo": "./src/apk-repo.js",
+    "./apk-fetch": "./src/apk-fetch.js",
+    "./apk-format": "./src/apk-format.js"
   },
   "browser": "./src/browser.js"
 }
