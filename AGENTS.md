@@ -68,7 +68,7 @@ The vendored `containers/blinkenlib.wasm` (sha 3b9351bb7d1c, lanmower/blink
 @libblink-portabox, CI run 26594035720) is a **threaded, sockets-enabled,
 framebuffer-capable** build. This SUPERSEDES the NOSOCK / single-threaded /
 no-framebuffer / argv-space-joined / pipe=EBADF claims in the older sections
-below (kept for history). Current reality, witnessed by `test.js` 18/18:
+below (kept for history). Current reality, witnessed by `test.js` 19/19:
 
 - **Threads ON.** Built `-pthread` with `--shared-memory --import-memory`
   + `-sPTHREAD_POOL_SIZE=8`. The WASM memory is shared/imported, so read the

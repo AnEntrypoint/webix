@@ -11,6 +11,7 @@ on:
       - "containers/hello-x86_64.elf"
       - "containers/busybox-x86_64.elf"
       - "containers/sse2-test.elf"
+      - "containers/fbtest.elf"
       - "containers/alpine-minirootfs-x86_64.tar.gz"
       - "containers/busybox-static.apk"
       - ".github/workflows/pages.yml"
@@ -38,6 +39,7 @@ jobs:
           cp containers/hello-x86_64.elf    docs/assets/
           cp containers/busybox-x86_64.elf  docs/assets/
           cp containers/sse2-test.elf       docs/assets/
+          cp containers/fbtest.elf          docs/assets/
           cp src/blink-core.js              docs/assets/
           cp src/blink-core-helpers.js      docs/assets/
           cp src/blink-core-boot.js         docs/assets/
@@ -47,6 +49,7 @@ jobs:
           cp src/blink-core-x.js            docs/assets/
           cp src/x86_64-blink-browser.js    docs/assets/
           cp src/x86_64-witness-bootstrap.js docs/assets/
+          cp src/display.js                 docs/assets/
           cp src/alpine-apk.js              docs/assets/
           cp src/apk-format.js              docs/assets/
           cp src/apk-repo.js                docs/assets/

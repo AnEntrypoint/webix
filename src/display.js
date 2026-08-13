@@ -84,9 +84,24 @@ export function attachDisplay(host, canvas, opts = {}) {
   if (hasInput) {
     on(canvas, "keydown", (e) => { host.pushInput({ type: "key", down: 1, code: e.keyCode, key: e.key }); e.preventDefault(); });
     on(canvas, "keyup", (e) => { host.pushInput({ type: "key", down: 0, code: e.keyCode, key: e.key }); e.preventDefault(); });
-    on(canvas, "mousemove", (e) => { const r = canvas.getBoundingClientRect(); host.pushInput({ type: "motion", x: ((e.clientX - r.left) * canvas.width / r.width) | 0, y: ((e.clientY - r.top) * canvas.height / r.height) | 0 }); });
-    on(canvas, "mousedown", (e) => { host.pushInput({ type: "button", down: 1, button: e.button }); });
-    on(canvas, "mouseup", (e) => { host.pushInput({ type: "button", down: 0, button: e.button }); });
+    // Pointer Events cover mouse+touch+pen through one API (unlike the old
+    // mouse-only listeners, which left the framebuffer/X-display feature
+    // unusable on touch-only devices). setPointerCapture keeps drag events
+    // arriving even if a touch slides off the canvas mid-gesture.
+    canvas.style.touchAction = "none";
+    on(canvas, "pointerdown", (e) => {
+      canvas.setPointerCapture(e.pointerId);
+      const r = canvas.getBoundingClientRect();
+      host.pushInput({ type: "motion", x: ((e.clientX - r.left) * canvas.width / r.width) | 0, y: ((e.clientY - r.top) * canvas.height / r.height) | 0 });
+      host.pushInput({ type: "button", down: 1, button: e.button });
+      e.preventDefault();
+    });
+    on(canvas, "pointermove", (e) => {
+      const r = canvas.getBoundingClientRect();
+      host.pushInput({ type: "motion", x: ((e.clientX - r.left) * canvas.width / r.width) | 0, y: ((e.clientY - r.top) * canvas.height / r.height) | 0 });
+    });
+    on(canvas, "pointerup", (e) => { host.pushInput({ type: "button", down: 0, button: e.button }); });
+    on(canvas, "pointercancel", (e) => { host.pushInput({ type: "button", down: 0, button: e.button }); });
     canvas.tabIndex = 0; // make the canvas focusable for key events
   }
 

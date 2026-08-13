@@ -8,7 +8,7 @@ Replaces what most projects in this category hand-roll: no JS instruction decode
 
 ```bash
 npm install
-npm test    # 18/18 integration cases against real busybox/apk via Blink
+npm test    # 19/19 integration cases against real busybox/apk via Blink
 ```
 
 ## CLI
@@ -57,8 +57,8 @@ No bespoke runtime — the i386 interpreter, custom VFS, syscall dispatcher, and
 
 ## Witnessed coverage
 
-18/18 integration cases in `test.js`:
-ELF64 dispatch · hand-built hello (exit 42) · musl-static busybox (echo/uname/expr) · alpine dynamic /bin/busybox + /sbin/apk via ld-musl · multi-line sh script from MEMFS · runShellScript · byte-exact snapshot/restore of wasm memory + registers · SSE2 round-trip · AVX SIGILL boundary · NODEFS host passthrough · sockets enabled · multi-word argv survival · pipe() syscall · framebuffer getters + pipeline · preloadFile handle reuse · apk add extraction (JS-driven + real multi-member) · apk info/list.
+19/19 integration cases in `test.js`:
+ELF64 dispatch · hand-built hello (exit 42) · musl-static busybox (echo/uname/expr) · alpine dynamic /bin/busybox + /sbin/apk via ld-musl · multi-line sh script from MEMFS · runShellScript · byte-exact snapshot/restore of wasm memory + registers · SSE2 round-trip · AVX SIGILL boundary · NODEFS mount + host passthrough · NODEFS guest write-back · sockets enabled · multi-word argv survival · pipe() syscall · framebuffer getters + pipeline · preloadFile handle reuse · apk add extraction (JS-driven + real multi-member) · apk info/list.
 
 
 ## Live demo
