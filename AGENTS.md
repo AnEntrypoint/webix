@@ -170,9 +170,11 @@ then and is now RESOLVED:
 - **Port 8765 is frequently squatted** on the dev box by a background
   `python -m http.server`. Use 9123 (or any other free port) for the
   static-server step in the browser witness flow.
-- **Bun parity.** `bun test.js` passes 11/11 alongside Node 23.10.0 —
-  file:// dynamic import + emscripten glue + wasm load all work in Bun
-  1.3.8 without modification. Both runtimes are first-class for tests.
+- **Bun parity [SUPERSEDED, see "Bun regression under the threaded build"
+  below].** `bun test.js` passes 11/11 alongside Node 23.10.0 — file://
+  dynamic import + emscripten glue + wasm load all work in Bun 1.3.8
+  without modification. This held for the pre-v0.8.0 single-threaded
+  build; it does NOT hold for the current -pthread build.
 
 ## gh-pages demo (docs/)
 
@@ -514,5 +516,39 @@ UPDATE section above.
   exercises it, and `docs/index.html` has no X-client demo panel (the
   framebuffer panel added alongside this note demos the lower-level
   zero-copy framebuffer, not a live X session).
+
+## Bun regression under the threaded build (found live, adding CI coverage)
+
+The "Bun parity" claim above (11/11, Bun 1.3.8, pre-v0.8.0) was never
+re-verified against the current `-pthread`/`PTHREAD_POOL_SIZE=8` build
+before `.github/workflows/test.yml` gained a `bun test.js` job. Running it
+locally first (Bun 1.3.11) caught a real regression before it shipped as a
+false claim:
+
+- **15/22 pass; 2 fail with "Worker has been terminated"; 5 more cascade-
+  fail with "Out of memory" afterward.** `hand-built hello-x86_64` (a
+  single `runElf` call) passes; `musl-static busybox: echo + uname + expr`
+  (multiple sequential `runElf` calls on one host, which routes the 2nd+
+  call through blink-core.js's thread-slot re-entrancy path per its
+  RE-ENTRANCY comment) fails with a worker termination, and `alpine
+  /bin/busybox + apk` (same pattern) fails the same way.
+- **The OOM cascade is consistent with the pthread-pool leak this session
+  already found and partially fixed** (see `blink-core-host-dispose-api`):
+  each `createBlinkHost` spins up 8 real worker threads with no teardown
+  between test.js's ~20 host instantiations; Node evidently tolerates the
+  accumulation within one run, Bun's worker_threads implementation does
+  not, and the crashed-but-unreaped workers from the two failed tests
+  above appear to compound it.
+- **Root cause is inside Bun's own worker_threads/shared-WebAssembly.Memory
+  handling, not (as far as diagnosed) webix's own code** — the crash trace
+  is `blinkenlib.js:1015 receiveInstance -> assert -> abort` during a
+  second worker's wasm instantiation message, a path Node's worker_threads
+  handles without incident on the identical glue and wasm bytes. A full
+  fix would need a Bun-side or upstream-emscripten-glue investigation
+  disproportionate to this pass; the CI job added alongside this note
+  (`test-bun` in `test.yml`) is deliberately `continue-on-error: true` so
+  the regression is a visible, tracked canary rather than a silent claim
+  or a hard CI gate — do not flip it to blocking until this is actually
+  fixed, and do not restate "Bun parity" as current until it passes clean.
 
 @.gm/next-step.md
