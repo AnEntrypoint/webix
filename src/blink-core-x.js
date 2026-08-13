@@ -25,6 +25,12 @@ export function createXRunner(Module, io){
       if(xpump) throw new Error("blink-core: X server already running");
       if(typeof Module._blinkenlib_run_thread_slot!=="function")
         throw new Error("blink-core: blinkenlib_run_thread_slot missing (rebuild blink)");
+      // Real guard (not just a documented-but-unchecked capability flag): the
+      // thread-slot path needs pthread_create, which needs SharedArrayBuffer,
+      // which needs crossOriginIsolated (COOP/COEP) in a browser tab. Failing
+      // fast here with a named cause beats a silent hang inside vm_spawn.
+      if(typeof SharedArrayBuffer==="undefined")
+        throw new Error("blink-core: startXServer needs SharedArrayBuffer (serve with COOP/COEP for crossOriginIsolated, or use coi-serviceworker.js)");
       const FS=Module.FS;
       writeProg(FS,progname,serverBytes);
       io.resetOutput();
@@ -61,13 +67,13 @@ export function createXRunner(Module, io){
     },
     stopX(){ if(xpump){ clearInterval(xpump); xpump=null; } xserverH=null; },
     xRunning(){ return !!xpump; },
-    // Tears down what a JS-side host can reach: this stops the pump above (the
-    // real leak this guards against -- a caller that starts an X server and
-    // never calls dispose()/stopX() leaks the interval and its underlying
-    // VM/worker forever) and best-effort reaps the pthread pool. Module.PThread
-    // is not in EXPORTED_RUNTIME_METHODS (build-blink.yml) yet, so
-    // terminateAllThreads is unreachable today -- optional chaining makes this
-    // call start working the moment that export lands, no further code change.
+    // Tears down what a JS-side host can reach: stops the pump above (the real
+    // leak this guards against -- a caller that starts an X server and never
+    // calls dispose()/stopX() leaks the interval and its underlying VM/worker
+    // forever) and reaps the pthread pool via Module.PThread.terminateAllThreads
+    // (exported since build-blink.yml added "PThread" to
+    // EXPORTED_RUNTIME_METHODS). Optional chaining stays as a defensive no-op
+    // against an older, locally-built wasm that predates that export.
     dispose(){
       if(xpump){ clearInterval(xpump); xpump=null; } xserverH=null;
       Module.PThread?.terminateAllThreads?.();
