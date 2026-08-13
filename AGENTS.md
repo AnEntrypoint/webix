@@ -468,4 +468,42 @@ then commit. `COMPONENT_API.md` in that repo documents the real contracts
   To make copy work, wrap `Install` in a div with `onclick` that checks
   `e.target.closest('.copy')` and copies/sets state yourself.
 
+## X server / X client under blink is real and CI-tested, but undocumented until now
+
+A substantial capability shipped without ever being written up here: a
+patched GL-less `Xvfb` runs persistently inside the wasm host, and real X
+clients (`xdpyinfo`, `xsetroot`, `xappdemo`) connect to it. This is separate
+from (and layered on top of) the framebuffer pipeline in the CAPABILITY
+UPDATE section above.
+
+- **`.github/workflows/xorg-patched-build.yml`** builds a GL-less patched
+  `Xvfb` from Xorg source (musl static, no-fork keymap loading) and a
+  bundled X-client-library overlay, committing three artifacts:
+  `containers/Xvfb-patched` (the server ELF), `containers/server.xkm` (a
+  precompiled keymap — `RunXkbComp` is patched out since blink has no
+  fork()), and `containers/x-client-overlay.tar.gz` (xdpyinfo/xsetroot/
+  libX11/libxcb/pixman/etc., ~7.6MB). These are load-bearing CI fixtures,
+  not dead weight — do not remove them without also removing the smoke
+  tests below.
+- **`build-blink.yml`'s own smoke-test steps** (all passing as of this
+  writing) mount the overlay + Xvfb-patched + server.xkm into the guest FS
+  and prove, end to end: an Alpine Xvfb boots under blink (4GB memory +
+  mprotect-ENOSYS shim), the patched GL-less Xvfb boots without forking,
+  a real X client connects to the in-page Xvfb, and the "PRODUCT path"
+  (bundled overlay, no apk) client run works too.
+- **The JS-side surface is `src/blink-core-x.js`** (`createXRunner`):
+  `startXServer(serverBytes)` boots Xvfb onto thread-slot 0 with an
+  always-on `setInterval` proxy pump; `launchXClient(clientBytes)` runs a
+  client against it on slot 1 and resolves on that client's exit while the
+  server keeps serving; `dispose()`/`stopX()` tear the pump down.
+  `containers/xappdemo.elf` is the render-once in-guest GUI app this
+  drives (draggable window -> framebuffer; the host re-runs it per
+  animation tick since `runElf` is synchronous).
+- **Not yet wired into `test.js` or the gh-pages demo.** The X-server path
+  is proven only by `build-blink.yml`'s own CI smoke steps and by direct
+  `startXServer`/`launchXClient` calls — no `t()` case in `test.js`
+  exercises it, and `docs/index.html` has no X-client demo panel (the
+  framebuffer panel added alongside this note demos the lower-level
+  zero-copy framebuffer, not a live X session).
+
 @.gm/next-step.md

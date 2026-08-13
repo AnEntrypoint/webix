@@ -104,7 +104,13 @@ export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"
   // parallelized inside resolveClosure); phase 2 fetches every .apk with
   // bounded concurrency (default 4) instead of one dependency at a time;
   // phase 3 extracts each in closure order (deps before dependents).
-  async function addByName(name, { concurrency=4 }={}){
+  // onProgress(evt) fires per package per phase ({phase:'resolve'|'fetch-
+  // start'|'fetch-done'|'fetch-fail'|'extract-done', name, total}) -- a single
+  // race attempt can legitimately take up to ~84s worst case (5 fetch paths x
+  // 3 retries x 20s timeout each, see apk-fetch.js), and without this a caller
+  // watching a large dependency closure install has no visibility into which
+  // package is stalling until the whole call resolves or throws.
+  async function addByName(name, { concurrency=4, onProgress=()=>{} }={}){
     const pkgName=await repo.resolve(name);
     if(pkgName && installed.has(pkgName)){
       const p=installed.get(pkgName);
@@ -112,7 +118,18 @@ export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"
     }
     const order=[];
     await resolveClosure(name, new Set(), order);
-    const fetched=await mapLimit(order, concurrency, async pkg=>({ pkg, bytes:await corsFetch(pkg.url, { fetchImpl, ...(repoOpts||{}) }) }));
+    onProgress({ phase:"resolve", total:order.length });
+    const fetched=await mapLimit(order, concurrency, async pkg=>{
+      onProgress({ phase:"fetch-start", name:pkg.name, total:order.length });
+      try{
+        const bytes=await corsFetch(pkg.url, { fetchImpl, ...(repoOpts||{}) });
+        onProgress({ phase:"fetch-done", name:pkg.name, total:order.length });
+        return { pkg, bytes };
+      }catch(e){
+        onProgress({ phase:"fetch-fail", name:pkg.name, total:order.length, error:e.message });
+        throw e;
+      }
+    });
     // Verify each fetch against APKINDEX's checksum before extracting -- a
     // compromised/MITM'd CORS proxy (third-party infra we don't control) could
     // otherwise silently substitute a malicious .apk. A missing/unparseable
@@ -125,6 +142,7 @@ export function createApk(host, { root="", fetchImpl=(typeof fetch!=="undefined"
     let result=null;
     for(const { pkg, bytes } of fetched){
       const r=await addBytes(bytes);
+      onProgress({ phase:"extract-done", name:pkg.name, total:order.length });
       if(pkg.name===order[order.length-1].name) result={ ...r, url:pkg.url };
     }
     return result;
