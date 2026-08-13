@@ -8,7 +8,7 @@ Replaces what most projects in this category hand-roll: no JS instruction decode
 
 ```bash
 npm install
-npm test    # 19/19 integration cases against real busybox/apk via Blink
+npm test    # 22/22 integration cases against real busybox/apk via Blink
 ```
 
 ## CLI
@@ -57,8 +57,8 @@ No bespoke runtime — the i386 interpreter, custom VFS, syscall dispatcher, and
 
 ## Witnessed coverage
 
-19/19 integration cases in `test.js`:
-ELF64 dispatch · hand-built hello (exit 42) · musl-static busybox (echo/uname/expr) · alpine dynamic /bin/busybox + /sbin/apk via ld-musl · multi-line sh script from MEMFS · runShellScript · byte-exact snapshot/restore of wasm memory + registers · SSE2 round-trip · AVX SIGILL boundary · NODEFS mount + host passthrough · NODEFS guest write-back · sockets enabled · multi-word argv survival · pipe() syscall · framebuffer getters + pipeline · preloadFile handle reuse · apk add extraction (JS-driven + real multi-member) · apk info/list.
+22/22 integration cases in `test.js`:
+ELF64 dispatch · hand-built hello (exit 42) · musl-static busybox (echo/uname/expr) · alpine dynamic /bin/busybox + /sbin/apk via ld-musl · multi-line sh script from MEMFS · runShellScript · byte-exact snapshot/restore of wasm memory + registers · SSE2 round-trip · AVX SIGILL boundary · NODEFS mount + host passthrough · NODEFS guest write-back · sockets enabled · multi-word argv survival · pipe() syscall · framebuffer getters + pipeline · preloadFile handle reuse · apk add extraction (JS-driven + real multi-member) · apk info/list · apk remove · dispose() teardown · persistent X-server (a real X client talks X11 to an in-page Xvfb via startXServer/launchXClient).
 
 
 ## Live demo
