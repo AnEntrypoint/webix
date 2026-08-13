@@ -134,7 +134,7 @@ var ja=Object.defineProperty;var Y=(e,t)=>()=>(e&&(t=e(e=0)),t);var fe=(e,t)=>{f
   }
 }`.trim(),document.head.appendChild(e)}function We(e){if(!e||typeof e.querySelectorAll!="function")return;e.querySelectorAll(".ds-hero,.panel,.ds-section,.app-main > *").forEach((n,s)=>{if(n.dataset.anim==="ready")return;n.dataset.anim="in";let r=Math.min(s,6)*30;setTimeout(()=>{n.dataset.anim="ready"},r)})}De();mn();gn();function pe(e){return String(e).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}function Ia(e){return e.replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>").replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2">$1</a>')}function Hi(e){let t=String(e||"").split(`
 `),n=[],s=!1,r=!1;for(let a of t){if(a.startsWith("```")){s?(n.push("</pre>"),s=!1):(n.push("<pre>"),s=!0);continue}if(s){n.push(pe(a));continue}a.startsWith("# ")?n.push(`<h1>${pe(a.slice(2))}</h1>`):a.startsWith("## ")?n.push(`<h2>${pe(a.slice(3))}</h2>`):a.startsWith("### ")?n.push(`<h3>${pe(a.slice(4))}</h3>`):a.startsWith("- ")?(r||(n.push("<ul>"),r=!0),n.push(`<li>${Ia(pe(a.slice(2)))}</li>`)):(r&&(n.push("</ul>"),r=!1),a.trim()&&n.push(`<p>${Ia(pe(a))}</p>`))}return r&&n.push("</ul>"),s&&n.push("</pre>"),n.join(`
-`)}function Bi(e,t){if(!t)return"#";let n=String(t);if(/^([a-z]+:|#|\/\/)/i.test(n)||!e)return n;let s=e.replace(/\/+$/,"");return n.startsWith("/")?s+n:s+"/"+n.replace(/^\.?\//,"")}function Da({title:e="247420",slug:t="index",siteName:n="247420",navItems:s=[],basePath:r="",hero:a,sections:o,examples:i,body:l,theme:c="auto",cssHref:d,headExtra:p=""}={}){let u=d?`<link rel="stylesheet" href="${d}">`:'<link rel="stylesheet" href="https://unpkg.com/anentrypoint-design@latest/dist/247420.css">',f=(Array.isArray(s)?s:[]).map(([y,x])=>[y,Bi(r,x)]),m={title:e,slug:t,siteName:n,navItems:f,theme:c,hero:a||null,sections:Array.isArray(o)?o:[],examples:Array.isArray(i)?i:[],bodyHtml:l?Hi(l):""};return`<!doctype html>
+`)}function Bi(e,t){if(!t)return"#";let n=String(t);if(/^([a-z]+:|#|\/\/)/i.test(n)||!e)return n;let s=e.replace(/\/+$/,"");return n.startsWith("/")?s+n:s+"/"+n.replace(/^\.?\//,"")}function Da({title:e="247420",slug:t="index",siteName:n="247420",navItems:s=[],basePath:r="",hero:a,sections:o,examples:i,body:l,theme:c="auto",cssHref:d,headExtra:p=""}={}){let u=d?`<link rel="stylesheet" href="${d}">`:'<link rel="stylesheet" href="https://raw.githack.com/AnEntrypoint/design/main/dist/247420.css">',f=(Array.isArray(s)?s:[]).map(([y,x])=>[y,Bi(r,x)]),m={title:e,slug:t,siteName:n,navItems:f,theme:c,hero:a||null,sections:Array.isArray(o)?o:[],examples:Array.isArray(i)?i:[],bodyHtml:l?Hi(l):""};return`<!doctype html>
 <html lang="en" class="ds-247420" data-theme="${c}">
 <head>
 <meta charset="utf-8">
@@ -142,7 +142,7 @@ var ja=Object.defineProperty;var Y=(e,t)=>()=>(e&&(t=e(e=0)),t);var fe=(e,t)=>{f
 <title>${pe(e)} \u2014 ${pe(n)}</title>
 ${u}
 <script type="importmap">
-{ "imports": { "anentrypoint-design": "https://unpkg.com/anentrypoint-design@latest/dist/247420.js" } }
+{ "imports": { "anentrypoint-design": "https://raw.githack.com/AnEntrypoint/design/main/dist/247420.js" } }
 <\/script>
 <style>
 .app-stage { max-width: 1100px; margin: 0 auto; padding: 24px; display: grid; gap: 24px }
