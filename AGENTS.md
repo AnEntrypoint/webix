@@ -485,12 +485,21 @@ UPDATE section above.
   libX11/libxcb/pixman/etc., ~7.6MB). These are load-bearing CI fixtures,
   not dead weight — do not remove them without also removing the smoke
   tests below.
-- **`build-blink.yml`'s own smoke-test steps** (all passing as of this
-  writing) mount the overlay + Xvfb-patched + server.xkm into the guest FS
-  and prove, end to end: an Alpine Xvfb boots under blink (4GB memory +
-  mprotect-ENOSYS shim), the patched GL-less Xvfb boots without forking,
-  a real X client connects to the in-page Xvfb, and the "PRODUCT path"
-  (bundled overlay, no apk) client run works too.
+- **`build-blink.yml`'s smoke-test steps prove less than their green
+  checkmarks suggest — verify from the real log, not the Actions UI.**
+  Four steps exist: X-smoke and PX-smoke (server-alone, via `host.runElf`
+  directly) genuinely run and are real. XC-smoke ("real X client
+  connects") and XO-smoke ("PRODUCT path") were BROKEN from the
+  `blink-core-x.js` refactor (old code called a `host.runConcurrent(...)`
+  that no longer exists) until this was caught and fixed — before the fix,
+  XC-smoke printed "runConcurrent missing (old blink-core)" and silently
+  exited 0 (never booted anything, still green), and XO-smoke threw
+  `TypeError: host.runConcurrent is not a function` and exited 1, masked
+  green by `continue-on-error: true`. Both now call the real
+  `startXServer`/`launchXClient` API. `continue-on-error: true` on all
+  four X-smoke steps means a REAL regression in any of them still shows
+  green in the Actions UI — read the step log, not the checkmark, before
+  trusting an "X works" claim from this workflow.
 - **The JS-side surface is `src/blink-core-x.js`** (`createXRunner`):
   `startXServer(serverBytes)` boots Xvfb onto thread-slot 0 with an
   always-on `setInterval` proxy pump; `launchXClient(clientBytes)` runs a
