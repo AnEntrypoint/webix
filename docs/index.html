@@ -237,6 +237,7 @@
           elfUrl:  ASSETS + 'hello-x86_64.elf',
           rootfsUrl: ASSETS + 'alpine-minirootfs-x86_64.tar.gz',
           lazyRootfs: true,
+          persist: true,
           argv: ['hello'],
           onLog: log
         });
@@ -350,8 +351,8 @@
           h('p', { class: 'wb-hero2-body' },
             'a real busybox shell on a blink wasm cpu - ~150 linux syscalls, real ELF, real apk. no js syscall layer. type into the terminal; it runs in this tab.'),
           h('div', { class: 'wb-chips' },
-            h('span', { class: 'wb-chip' }, '22/22 tests'),
-            h('span', { class: 'wb-chip' }, 'node first-class'),
+            h('span', { class: 'wb-chip' }, '23/23 tests'),
+            h('span', { class: 'wb-chip' }, 'node 23/23'),
             h('span', { class: 'wb-chip' }, 'threaded + sockets'),
             h('span', { class: 'wb-chip' }, 'sse2')
           ),
@@ -394,6 +395,7 @@
           h('div', { class: 'wb-tw-chips' },
             twChip('ls -la /', 'ls -la /'),
             twChip('uname -a', 'uname -a'),
+            twChip('ls / | sort', 'ls / | sort'),
             twChip('cal', 'cal'),
             twChip('id', 'id'),
             twChip('apk search editor', 'apk search editor'),
@@ -460,9 +462,9 @@
         { name:'blink owns the cpu surface', desc:'~150 linux x86_64 syscalls, signals, the mmu, and instruction decode — all in the upstream blink wasm. no parallel js abi. this portabox build is threaded (pthread) and sockets-enabled; only fork/clone (no emscripten fork) stays out of scope.', meta:'host' },
         { name:'<200 lines per file',        desc:'every module under the cap. if it grows past 200L it splits before merge. forces composition over sprawl.', meta:'invariant' },
         { name:'single orchestration surface', desc:'createBlinkCore.runElf is the only run path. the earlier xstate kernel/machines wrapper over runElf was removed as unused indirection the demo and cli never exercised.', meta:'v0.8.0' },
-        { name:'node first-class, bun partial', desc:'node test.js passes 22/22. bun currently passes 15/22 under this threaded build (a tracked worker_threads regression, see AGENTS.md) -- node is the supported runtime until that closes.', meta:'runtime' },
+        { name:'node: full 23/23',            desc:'node test.js passes 23/23. bun currently hits a real bun engine bug (a worker-thread segfault, not a webix defect) under the threaded wasm build -- tracked as a known limitation, not claimed as parity.', meta:'node' },
         { name:'browser witnessed',          desc:'this page boots the same host the test suite uses. window.__debug.x86_64 is the contract — ready, exitCode, registers, stdout, runElf, snapshot.', meta:'live' },
-        { name:'threaded + sockets, NOJIT',  desc:'sse2 verified. avx traps SIGILL. threads + AF_INET sockets on. no fork() (emscripten) so full shell pipelines are out; JIT is impossible under wasm32. fork emsdk to lift the rest.', meta:'caveat' }
+        { name:'threaded + sockets, NOJIT',  desc:'sse2 verified. avx traps SIGILL. threads + AF_INET sockets on. no fork() (emscripten), so a real streaming shell pipeline can\'t run -- but a non-streaming batch emulation (try it: ls -la / | grep bin) makes simple pipelines work anyway. JIT is impossible under wasm32.', meta:'caveat' }
       ];
       return h('div', { id: 'architecture' }, C.Panel({
         title: 'architecture',
@@ -558,7 +560,7 @@
         h('span', { class: 'wb-foot-item wb-foot-accent' }, 'main · ' + state.status),
         h('span', { class: 'wb-foot-spread' }),
         h('span', { class: 'wb-foot-item' }, 'blink'),
-        h('span', { class: 'wb-foot-item' }, '22/22'),
+        h('span', { class: 'wb-foot-item' }, '23/23'),
         h('span', { class: 'wb-foot-item' }, exit)
       );
     }

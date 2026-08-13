@@ -7,6 +7,7 @@ import { architectures, x86_64, i386 } from "./src/arch.js";
 import { createBlinkHost } from "./src/x86_64-blink.js";
 import { createApk } from "./src/alpine-apk.js";
 import { mkdirp } from "./src/apk-format.js";
+import { runPipeline, isPipeline, splitPipeline } from "./src/shell-pipeline.js";
 
 // Build a minimal gzipped .apk (tar.gz) in-memory: a .PKGINFO member + one file.
 function tarHeader(name, size, type="0", mode=0o644){
@@ -41,13 +42,27 @@ const blob = (path) => fs.readFileSync(path);
 const ALPINE_TAR = zlib.gunzipSync(blob("containers/alpine-minirootfs-x86_64.tar.gz"));
 const HELLO = blob("containers/hello-x86_64.elf");
 const BUSYBOX_STATIC = blob("containers/busybox-x86_64.elf");
-async function alpineHost(){ const h=await createBlinkHost({}); h.mountTarBytes(ALPINE_TAR); return h }
 const guestBytes = (h, p) => Buffer.from(h.Module.FS.readFile(p));
+
+// Every createBlinkHost() spins a real 8-worker pthread pool with no implicit
+// teardown; test.js creates ~20 hosts in one run, and leaving them undisposed
+// is the confirmed root cause of the Bun worker_threads OOM cascade (live
+// witness: bun test.js went from 22/22 to 13 pass 9 fail "Out of memory",
+// starting right after the first un-disposed host accumulated enough workers).
+// newHost()/alpineHost() register every host they create; t()'s finally block
+// disposes them all after each test, whether it passed, failed, or the test
+// body already called dispose() itself (dispose() is idempotent).
+const liveHosts=[];
+async function newHost(opts={}){ const h=await createBlinkHost(opts); liveHosts.push(h); return h }
+async function alpineHost(){ const h=await newHost({}); h.mountTarBytes(ALPINE_TAR); return h }
 
 let pass=0, fail=0;
 async function t(name, fn){
   try{ await fn(); console.log("PASS", name); pass++ }
   catch(e){ console.log("FAIL", name, e.message); fail++ }
+  finally{
+    while(liveHosts.length){ const h=liveHosts.pop(); try{ if(typeof h.dispose==="function") h.dispose(); }catch(_){} }
+  }
 }
 
 // GNU base-256-size + PAX/long-name-safe tar walker, ported from
@@ -93,14 +108,14 @@ await t("ELF64 parse + arch dispatch", async () => {
 });
 
 await t("hand-built hello-x86_64 ELF prints hi exit 42", async () => {
-  const host=await createBlinkHost({});
+  const host=await newHost({});
   const r=await race(host.runElf(HELLO, { argv:["hello"] }), 10000);
   assert.equal(r.exitCode, 42);
   assert.match(r.stdout, /hi/);
 });
 
 await t("musl-static busybox: echo + uname + expr", async () => {
-  const host=await createBlinkHost({});
+  const host=await newHost({});
   const echo=await race(host.runElf(BUSYBOX_STATIC, { argv:["echo", "hello", "x86_64"] }), 12000);
   assert.equal(echo.exitCode, 0);
   assert.match(echo.stdout, /hello x86_64/);
@@ -142,7 +157,7 @@ await t("runShellScript: quoted strings + variables + arithmetic", async () => {
 });
 
 await t("snapshot/restore: byte-exact memory + register round-trip", async () => {
-  const host=await createBlinkHost({});
+  const host=await newHost({});
   await race(host.runElf(HELLO, { argv:["hello"] }), 10000);
   const snap=host.snapshot();
   assert.equal(snap.registers.rax, 0x3cn);
@@ -160,15 +175,15 @@ await t("snapshot/restore: byte-exact memory + register round-trip", async () =>
 });
 
 await t("SSE2 supported, AVX not (Blink build coverage boundary)", async () => {
-  const sse2=await (await createBlinkHost({})).runElf(blob("containers/sse2-test.elf"), { argv:["sse2"] });
+  const sse2=await (await newHost({})).runElf(blob("containers/sse2-test.elf"), { argv:["sse2"] });
   assert.equal(sse2.exitCode, 0);
-  const avx=await (await createBlinkHost({})).runElf(blob("containers/avx-test.elf"), { argv:["avx"] });
+  const avx=await (await newHost({})).runElf(blob("containers/avx-test.elf"), { argv:["avx"] });
   assert.equal(avx.exitCode, 132);
   assert.equal(avx.signal?.sig, 4);
 });
 
 await t("NODEFS: mount host dir, busybox cat reads it", async () => {
-  const host=await createBlinkHost({});
+  const host=await newHost({});
   if(!host.capabilities.nodefs){ console.log("(skip: NODEFS not in this wasm build)"); return }
   const dir=os.tmpdir() + "/webix-nodefs-" + Date.now();
   fs.mkdirSync(dir, { recursive:true });
@@ -181,7 +196,7 @@ await t("NODEFS: mount host dir, busybox cat reads it", async () => {
 });
 
 await t("NODEFS: guest write-back reaches the real host filesystem", async () => {
-  const host=await createBlinkHost({});
+  const host=await newHost({});
   if(!host.capabilities.nodefs){ console.log("(skip: NODEFS not in this wasm build)"); return }
   const dir=os.tmpdir() + "/webix-nodefs-writeback-" + Date.now();
   fs.mkdirSync(dir, { recursive:true });
@@ -223,10 +238,37 @@ await t("pipe() syscall implemented (no ENOSYS); shell pipelines remain fork-blo
   assert.doesNotMatch(r.stderr, /pipe.*Function not implemented/i, "pipe() should be implemented: "+r.stderr);
 });
 
+await t("shell-pipeline.js: non-streaming batch emulation of a real pipe", async () => {
+  assert.deepEqual(splitPipeline('echo "a|b"'), ['echo "a|b"']);
+  assert.equal(isPipeline("echo hi | wc -c"), true);
+  assert.equal(isPipeline("echo hi"), false);
+  // Regression guard: `||` (bash OR, not a pipe) must NOT be misread as a
+  // 2-stage pipeline -- splitPipeline used to .filter(Boolean) the empty
+  // middle stage away, silently running it as a real pipe.
+  assert.equal(isPipeline("echo a || echo b"), false);
+  assert.equal(isPipeline("| echo a"), false);
+  assert.equal(isPipeline("echo a |"), false);
+  const host=await alpineHost();
+  const busybox=guestBytes(host,"/bin/busybox");
+  const r=await race(runPipeline(host, busybox, "echo hello webix world | wc -w"), 15000);
+  assert.equal(r.exitCode, 0);
+  assert.match(r.stdout, /\b3\b/, "wc -w should count 3 words: "+JSON.stringify(r.stdout));
+  assert.equal(r.stageCount, 2);
+  const three=await race(runPipeline(host, busybox, "printf 'b\\na\\nc\\n' | sort | tail -n 1"), 15000);
+  assert.equal(three.exitCode, 0);
+  assert.match(three.stdout, /c/, "three-stage pipeline should end sorted at c: "+JSON.stringify(three.stdout));
+  // A preloaded handle (string) works the same as raw bytes -- the path the
+  // browser CLI uses to avoid re-fetching busybox on every pipelined command.
+  const handle=host.preloadFile("busybox-pipe", busybox);
+  const viaHandle=await race(runPipeline(host, handle, "echo via handle | wc -w"), 15000);
+  assert.equal(viaHandle.exitCode, 0);
+  assert.match(viaHandle.stdout, /\b2\b/, "wc -w via preloaded handle should count 2 words: "+JSON.stringify(viaHandle.stdout));
+});
+
 await t("framebuffer: getters exist and report unset before guest registers", async () => {
   // The fb getters are exported and return 0 geometry until a guest registers
   // via syscall 0x5fb. fbInfo() returns null in that state.
-  const host=await createBlinkHost({});
+  const host=await newHost({});
   assert.equal(typeof host.fbInfo, "function");
   assert.equal(typeof host.fbView, "function");
   assert.equal(host.fbInfo(), null);
@@ -236,10 +278,14 @@ await t("framebuffer: getters exist and report unset before guest registers", as
 await t("framebuffer pipeline: guest fbtest registers gradient, host reads it zero-copy", async () => {
   // End-to-end display proof: a guest ELF mmaps an RGBA buffer, paints a
   // gradient, and publishes it via syscall 0x5fb. The host then reads geometry
-  // through fbInfo() and the pixels zero-copy via fbView() (spy_address). Built
-  // static x86_64 in CI; skipped locally when the artifact is absent.
-  if(!fs.existsSync("containers/fbtest.elf")){ console.log("(skip: containers/fbtest.elf not built locally)"); return }
-  const host=await createBlinkHost({});
+  // through fbInfo() and the pixels zero-copy via fbView() (spy_address).
+  // containers/fbtest.elf is git-tracked (`git ls-files containers/` confirms
+  // it), so its absence is a real regression, not a "not built locally"
+  // state -- a silent skip here previously still counted as a pass in the
+  // final tally, exactly the hardcoded-assumption failure mode this repo's
+  // test discipline exists to catch. Assert, don't skip.
+  assert.ok(fs.existsSync("containers/fbtest.elf"), "containers/fbtest.elf is git-tracked and must be present");
+  const host=await newHost({});
   const r=await race(host.runElf(blob("containers/fbtest.elf"), { argv:["fbtest"] }), 12000);
   assert.equal(r.exitCode, 42, "fbtest exit");
   const info=host.fbInfo();
@@ -262,7 +308,7 @@ await t("framebuffer pipeline: guest fbtest registers gradient, host reads it ze
 });
 
 await t("preloadFile: write ELF once, rerun via handle without re-supplying bytes", async () => {
-  const host=await createBlinkHost({});
+  const host=await newHost({});
   const handle=host.preloadFile("hello", HELLO);
   assert.equal(host.isPreloaded(handle), true);
   const r1=await race(host.runElf(null, { argv:["hello"], path:handle }), 10000);
@@ -329,7 +375,7 @@ await t("createApk: remove unlinks files + drops db entry", async () => {
 });
 
 await t("dispose(): tears down X pump + reaches PThread.terminateAllThreads when exported", async () => {
-  const host=await createBlinkHost({});
+  const host=await newHost({});
   assert.equal(typeof host.dispose, "function");
   host.dispose(); // no X server running yet -- must be a safe no-op
   assert.equal(host.xRunning(), false);
@@ -345,15 +391,23 @@ await t("persistent X-server model: startXServer + launchXClient, real client ta
   // Mirrors build-blink.yml's XO-smoke step (bundled overlay, no apk/network):
   // boot the patched GL-less Xvfb persistently, then run a real X client
   // (xdpyinfo) against it via the current startXServer/launchXClient API.
-  // Gracefully skips when the CI-only X-server artifacts aren't present in
-  // this checkout (they are build-blink.yml outputs, not committed source).
+  // All three are git-tracked (`git ls-files containers/` confirms it), not
+  // CI-only outputs, so a missing one is a real regression -- assert, don't
+  // silently skip-and-pass (a skip here previously still counted as a pass
+  // in the final tally, masking the exact class of gap a regressed/deleted
+  // artifact would create).
   const need=["containers/Xvfb-patched","containers/server.xkm","containers/x-client-overlay.tar.gz"];
-  if(need.some(p=>!fs.existsSync(p))){ console.log("(skip: X-server artifacts not built locally)"); return }
+  for(const p of need) assert.ok(fs.existsSync(p), p+" is git-tracked and must be present");
   const host=await alpineHost();
   const FS=host.Module.FS;
   const made=untarOverlay(FS, zlib.gunzipSync(blob("containers/x-client-overlay.tar.gz")));
   assert.ok(made>0, "overlay should extract at least one file");
-  if(!FS.analyzePath("/usr/bin/xdpyinfo").exists){ console.log("(skip: overlay missing xdpyinfo)"); return }
+  // Same class as the artifact-presence checks above: the overlay archive
+  // is git-tracked and asserted to exist, but a silent skip-and-return here
+  // on its EXTRACTED CONTENT still counted as a full pass with the rest of
+  // this test (the actual X11-client exercise) never running -- a corrupted
+  // or regressed overlay would go completely undetected.
+  assert.ok(FS.analyzePath("/usr/bin/xdpyinfo").exists, "x-client-overlay.tar.gz must extract /usr/bin/xdpyinfo");
   FS.writeFile("/usr/bin/Xvfb", blob("containers/Xvfb-patched")); FS.chmod("/usr/bin/Xvfb", 0o755);
   const xkm=blob("containers/server.xkm");
   for(const d of ["/tmp","/var/lib/xkb","/usr/share/X11/xkb/compiled",""]){
@@ -367,7 +421,11 @@ await t("persistent X-server model: startXServer + launchXClient, real client ta
   host.dispose();
   assert.equal(host.xRunning(), false);
   const cout=(c.stdout||"")+(c.stderr||"");
-  assert.ok(/number of screens|dimensions:|X\.Org/i.test(cout) || c.exitCode===0, "xdpyinfo should talk X11 to the in-page Xvfb: "+cout.slice(0,300));
+  // Was `regex.test(cout) || c.exitCode===0` -- an exit-0-with-empty-output
+  // client (connected but never actually queried/printed anything) would
+  // pass that OR without ever proving real X11 traffic happened. Require
+  // the real content match; exit 0 is corroborating, not sufficient alone.
+  assert.match(cout, /number of screens|dimensions:|X\.Org/i, "xdpyinfo should talk X11 to the in-page Xvfb: "+cout.slice(0,300));
 });
 
 console.log(`\nresult: ${pass} pass, ${fail} fail`);

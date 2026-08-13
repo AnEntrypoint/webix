@@ -533,7 +533,12 @@ jobs:
           EOF
 
       - name: X-client smoke (real X client connects to the in-page Xvfb)
-        continue-on-error: true
+        # This is the declared gate for the X-client capability (the XO-smoke
+        # step below calls itself "advisory" precisely because THIS step is
+        # the real one) -- continue-on-error here previously masked a genuine
+        # regression (host.runConcurrent removed, threw TypeError, step still
+        # showed green) per this workflow's own documented incident. No
+        # longer masked: a real regression in this step now fails the job.
         run: |
           # THE x-apps-work witness: run the patched Xvfb AND a real X client
           # (xdpyinfo / xsetroot — no keyboard needed) CONCURRENTLY in one blink
