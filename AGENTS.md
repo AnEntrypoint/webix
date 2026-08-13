@@ -110,16 +110,20 @@ below (kept for history). Current reality, witnessed by `test.js` 22/22:
   full-Linux-ABI-emulation approach. Keep the current Blink-in-wasm
   architecture; do not re-investigate without a fundamentally different
   target.
-- **Non-streaming shell-pipeline emulation is buildable, not yet
-  implemented.** `blink-core.js`'s `exitDeferred` guard already forces
-  strict sequential `runElf` calls, so a JS-level shell preprocessing layer
-  could fake `sh -c 'a|b'` by running stage `a` to completion, capturing its
-  full stdout, and feeding those bytes as stdin to stage `b`'s `runElf`.
-  This is **batch composition, not real streaming** — works for `ls|sort`,
-  fails for `yes|head`, `tail -f|grep`, or anything interactive/infinite.
-  No blink/wasm changes needed if implemented; scope it explicitly as
-  non-streaming if built, so a future session doesn't assume real
-  concurrent pipes work.
+- **Non-streaming shell-pipeline emulation is IMPLEMENTED (`src/shell-pipeline.js`,
+  live-witnessed 2026-08-13).** `runPipeline(host, busyboxBytes, cmdline)`
+  splits on top-level `|`, dispatches each stage argv DIRECTLY to busybox's
+  multi-call applet (never through `sh -c`, which forks to exec any non-builtin
+  applet and fails exit 126 with no fork()), and feeds a stage's output to the
+  next stage as a TEMP FILE argument (`/tmp/_webix_pipe_N`), not real stdin --
+  a blocking stdin read only completes on a host's very first `runElf`; every
+  later call on the same host re-enters through blink-core.js's thread-slot
+  RE-ENTRANCY path, where a stdin read was witnessed live to hang forever.
+  This is **batch composition, not real streaming** — proven for `echo ... |
+  wc -w` and a 3-stage `printf | sort | tail`, fails for `yes|head`,
+  `tail -f|grep`, or anything interactive/infinite (by construction, not a
+  bug). Wired into the gh-pages CLI (`docs/assets/cli.js`'s `exec()` routes
+  any input containing an unquoted `|` through it) and covered by test.js.
 
 ---
 
@@ -343,9 +347,31 @@ describes the *busybox CLI's* fresh-write-per-invocation pattern, NOT the
 host. The blink host is a **singleton** (`installWindowDebug` creates it
 once; `runElf` reuses it), so the emscripten FS **does persist across
 runElf calls within a page session**. This is why JS-driven apk install
-works: extracted files survive into later runs. Cross-reload persistence
-still needs an explicit IDBFS mount (`-lidbfs.js` is compiled in but no
-`FS.mount`/`syncfs` is wired yet).
+works: extracted files survive into later runs.
+
+**Cross-reload persistence is partially wired, not yet complete for apk
+installs (corrected 2026-08-13, live source read overturned the prior
+"not wired yet" claim).** `blink-core.js`'s `persistDir(guestDir)` /
+`syncPersist()` DO mount IDBFS and flush to it (`FS.mount(IDBFS,...)` +
+`FS.syncfs`), and `installWindowDebug({persist:true})` wires it through --
+`docs/index.html` now passes `persist:true` and `cli.js`'s `execApk`
+flushes via `syncPersist()` after every `apk add`. What is NOT yet solved:
+`persistDir` mounts IDBFS at a single directory (`/persist`), but apk
+packages install under the paths their own tar entries name --
+`/usr/bin`, `/usr/share`, `/lib`, `/etc` -- which sit outside `/persist`,
+so an apk-installed package still does not survive a reload today. Full
+apk-install persistence needs IDBFS mounted over the actual directories
+Alpine packages write to (a bounded set: `/usr`, `/lib`, `/etc`, `/bin`,
+`/sbin`, `/opt` cover essentially all real packages per FHS convention),
+mounted AFTER the base alpine rootfs extraction so first-boot content
+isn't masked by an empty IDBFS store, then synced. This was deliberately
+NOT attempted in this pass: mounting IDBFS over a directory the base
+rootfs already populated risks masking that content on first boot (mount
+semantics hide the underlying directory for that subtree), and this
+sandbox has no working browser/cdp surface to live-witness the mount
+order before landing it (see `witness-live-demo-in-real-browser` in
+`.gm/prd.yml` if still open) -- ship it only behind a real
+`page.evaluate` witness of a reload round-trip, never speculatively.
 
 ## Hero text correction (v0.6.4)
 
@@ -414,10 +440,23 @@ just the entry points. The full set the page needs:
 `x86_64-witness-bootstrap.js` → `x86_64-blink-browser.js`, `blink-core.js`,
 `alpine-apk.js`; plus runtime assets `alpine-minirootfs-x86_64.tar.gz` and
 `busybox-static.apk` (referenced by `rootfsUrl` and the `apk add` button —
-both were also missing from the cp list). `cli.js`/`display.js` are the only
-`docs/assets/*` files committed to git (gitignore exception); everything else
-is repopulated by CI from `src/`+`containers/`, so a missing `cp` line = a
-guaranteed live 404 that local witnessing cannot catch.
+both were also missing from the cp list).
+
+**CORRECTED (live-verified 2026-08-13): the "cli.js/display.js are the
+only committed docs/assets/* files" claim was wrong.** `.gitignore`'s real
+exception list (`docs/assets/*` + explicit `!` un-ignores) only ever
+covered `cli.js`, `247420.js`, `247420.css` — `display.js` was NEVER
+committed; it only exists in a checkout because `pages.yml`'s cp step
+copies `src/display.js` there during CI, same as every other `src/*.js`
+file synced in. This mattered in practice: adding `docs/assets/cli-apk.js`
+(a same-session split of cli.js to respect the <200-line cap) silently
+landed as gitignored and would have 404'd in production exactly like the
+v0.6.6 incident, caught only by manually diffing `git status --porcelain`
+against the file actually on disk. `.gitignore` now also un-ignores
+`docs/assets/cli-apk.js`. The real, current exception list is whatever
+`.gitignore`'s `!docs/assets/*.js`/`.css` lines say -- read that file
+directly rather than trusting a restated list here, since this exact
+restatement is what went stale.
 
 Fix witnessed by serving the corrected `docs/` locally and asserting the
 contract: `ready:true exitCode:42 rax:3c rdi:2a apkPresent:true`,
@@ -510,12 +549,14 @@ UPDATE section above.
   `containers/xappdemo.elf` is the render-once in-guest GUI app this
   drives (draggable window -> framebuffer; the host re-runs it per
   animation tick since `runElf` is synchronous).
-- **Not yet wired into `test.js` or the gh-pages demo.** The X-server path
-  is proven only by `build-blink.yml`'s own CI smoke steps and by direct
-  `startXServer`/`launchXClient` calls — no `t()` case in `test.js`
-  exercises it, and `docs/index.html` has no X-client demo panel (the
-  framebuffer panel added alongside this note demos the lower-level
-  zero-copy framebuffer, not a live X session).
+- **CORRECTED (live-verified 2026-08-13): test.js DOES exercise this.** The
+  claim above that no `t()` case covers `startXServer`/`launchXClient` was
+  stale — `test.js` has a `"persistent X-server model: startXServer +
+  launchXClient, real client talks X11"` case, and it PASSES live against
+  the artifacts already committed in `containers/` (not CI-only). The gap
+  that's still real: `docs/index.html` has no X-client demo panel (the
+  framebuffer panel demos the lower-level zero-copy framebuffer, not a live
+  X session) — that part of the original claim stands.
 
 ## Bun regression under the threaded build (found live, adding CI coverage)
 
@@ -550,5 +591,57 @@ false claim:
   the regression is a visible, tracked canary rather than a silent claim
   or a hard CI gate — do not flip it to blocking until this is actually
   fixed, and do not restate "Bun parity" as current until it passes clean.
+
+**Confirmed (re-witnessed live, Bun 1.3.11): eager `host.dispose()` after
+every `createBlinkHost` does NOT fix this, and it is not a leak webix code
+can work around.** test.js now disposes every host it creates (see
+`liveHosts`/`newHost` in test.js) — under Node this is a genuine, measured
+win (full-suite wall time 23.6s -> 13.6s, still 22/22), but under Bun the
+failure mode got WORSE, not better: only the first test passes, then Bun
+itself segfaults (`panic(main thread): Segmentation fault`, "Bun has
+crashed. This indicates a bug in Bun, not your code" — Bun's own crash
+banner) on the second host's worker spin-up. This is additional evidence
+the defect is inside Bun's worker_threads/shared-memory implementation,
+not in webix's host lifecycle: no dispose/no-dispose pattern from
+application code changes a JS engine segfaulting on its own thread
+teardown path. Do not re-attempt a webix-side fix without a concrete
+Bun-side patch or upstream issue to build against; the next real step is
+filing/finding the upstream Bun issue, not another webix-side workaround
+attempt.
+
+## Real-world Alpine package compatibility matrix (live-witnessed 2026-08-13)
+
+Beyond nano/tree, broader real packages were live-installed and run over
+the live network to establish the real "running everything" boundary,
+Node-side (no browser CORS proxy needed there):
+
+- **python3 (3.12.13-r0, 779 files): installs and runs correctly, but
+  SLOW.** `apk add python3` succeeds; `python3 -c "print(1+1)"` initially
+  looked hung at a 15s timeout -- re-tested at 45s and it completed in
+  **~27 seconds**, exit 0, correct output ("2"). This is real interpreter
+  + dynamic-linker startup cost under wasm emulation for a 779-file
+  package, not a bug -- but it is a genuine, measured performance
+  characteristic worth knowing before assuming a "hang" on any large
+  interpreted-language install. A future perf pass could target this
+  specifically (e.g. profiling where the 27s goes: dynamic linking vs.
+  interpreter init vs. syscall-emulation overhead) if fast Python startup
+  becomes a real product requirement.
+- **curl (8.14.1-r2, 4 files): installs cleanly**, not yet run end-to-end
+  against a real socket in this pass (sockets are enabled per the
+  capability update above; a live network fetch via curl under blink is
+  the natural next compat check, not attempted this session).
+- **The fork() boundary is the real, structural compatibility line, not
+  an approximation.** Every package/binary that is a single-process ELF
+  doing its own work (busybox applets, nano, tree, python3's own
+  interpreter loop, apk itself) runs correctly. Anything that needs to
+  fork+exec a CHILD process to do its job -- a real shell pipeline's 2nd+
+  stage, `make`, a language runtime's own subprocess spawning (e.g.
+  Python's `subprocess`/`multiprocessing`, not just the interpreter
+  itself), any daemon that forks to background -- cannot work under this
+  build (`HAVE_FORK` stays OFF, structurally, not a missing flag). This
+  is the single test to apply when guessing whether an untried package
+  will work: does its own operation require creating a second OS process,
+  or does it do everything in one process? The former fails; the latter
+  works.
 
 @.gm/next-step.md

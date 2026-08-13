@@ -64,10 +64,10 @@ export function createXRunner(Module, io){
     // Tears down what a JS-side host can reach: this stops the pump above (the
     // real leak this guards against -- a caller that starts an X server and
     // never calls dispose()/stopX() leaks the interval and its underlying
-    // VM/worker forever) and best-effort reaps the pthread pool. Module.PThread
-    // is not in EXPORTED_RUNTIME_METHODS (build-blink.yml) yet, so
-    // terminateAllThreads is unreachable today -- optional chaining makes this
-    // call start working the moment that export lands, no further code change.
+    // VM/worker forever) and reaps the pthread pool via Module.PThread.terminateAllThreads,
+    // exported by the current build-blink.yml portabox wasm (live-witnessed:
+    // test.js's dispose test reaches this branch, not the not-exported fallback).
+    // Optional chaining keeps this safe against an older wasm build regressing the export.
     dispose(){
       if(xpump){ clearInterval(xpump); xpump=null; } xserverH=null;
       Module.PThread?.terminateAllThreads?.();
