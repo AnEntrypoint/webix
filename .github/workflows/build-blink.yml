@@ -52,7 +52,11 @@ jobs:
         run: |
           ENV_VAL="web,worker,node"
           if [ "$WITH_NODE_ENV" = "false" ]; then ENV_VAL="web,worker"; fi
-          EXPORTS='"UTF8ToString","stringToNewUTF8","AsciiToString","FS","ENV","callMain","addFunction","wasmExports"'
+          # PThread exported so the JS host can call PThread.terminateAllThreads()
+          # for a real dispose()/teardown path -- without it, PTHREAD_POOL_SIZE=8
+          # OS worker_threads per host are unreachable from JS and leak for the
+          # process lifetime (see blink-core-x.js's dispose()).
+          EXPORTS='"UTF8ToString","stringToNewUTF8","AsciiToString","FS","ENV","callMain","addFunction","wasmExports","PThread"'
           # Explicitly export the framebuffer getters added in the portabox
           # branch so the JS host can map the guest framebuffer zero-copy.
           # (They are EMSCRIPTEN_KEEPALIVE too, but listing them here is robust
@@ -192,11 +196,21 @@ jobs:
       - name: Compile (emmake make blinkenlib)
         working-directory: libblink
         run: |
-          # KNOWN, INTENTIONAL: no -O2/MODE=rel here. See the CFLAGS export
-          # comment above -- both an -O2 attempt and an -O2+MODE=rel attempt
-          # hung indefinitely in CI (runs 31305991413, 31308526123). Reverted
-          # to the original unoptimized build (correct, just slow) until a
-          # local (non-CI) bisect finds the specific miscompiling flag/pass.
+          # STALE-COMMENT CORRECTION (verified live, run 31704224778): this
+          # step does NOT need to pass CFLAGS/MODE=rel itself -- blink's own
+          # configure script unconditionally writes `CFLAGS = ${CFLAGS}` to
+          # config.mk regardless of probe results (configure line ~725), so
+          # the earlier Configure step's `CFLAGS="-pthread -O2"` already
+          # reaches this compile. The "Diagnose resolved optimization level"
+          # step above confirmed `CFLAGS = -pthread -O2` in the real
+          # config.mk. The old claim here ("reverted to the original
+          # unoptimized build... until a local bisect") was wrong: runs
+          # 31305991413/31308526123 hung on the CI-worker-thread-keeps-event-
+          # loop-alive bug (fixed by explicit process.exit(0) in the smoke
+          # test below, run 31310478888), NOT on -O2 itself -- nobody
+          # re-verified that after the real fix landed, so the shipped
+          # blinkenlib.wasm has actually been -O2 all along. No MODE=rel or
+          # redundant CFLAGS override needed here.
           emmake make o//blink/blinkenlib.js -j$(nproc)
           find o -name 'blinkenlib.wasm' -o -name 'blinkenlib.js' | xargs ls -la || true
 

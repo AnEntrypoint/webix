@@ -17,11 +17,24 @@ function ensureWebEnv(){
   if(typeof globalThis.self==="undefined") globalThis.self=globalThis;
 }
 
+// Same 380KB wasm bytes are identical across every createBlinkHost call within
+// a process (test.js alone instantiates ~18 hosts) -- cache by resolved path
+// instead of re-reading from disk on every call.
+const wasmBinaryCache=new Map();
+
 export async function createBlinkHost(options={}){
   ensureWebEnv();
   const wasmPath=options.wasmPath??"containers/blinkenlib.wasm";
   const gluePath=options.gluePath??"containers/blinkenlib.js";
-  const wasmBinary=options.wasmBinary??fs.readFileSync(wasmPath);
+  let wasmBinary=options.wasmBinary;
+  if(!wasmBinary){
+    const resolved=path.resolve(wasmPath);
+    wasmBinary=wasmBinaryCache.get(resolved);
+    if(!wasmBinary){
+      wasmBinary=fs.readFileSync(resolved);
+      wasmBinaryCache.set(resolved, wasmBinary);
+    }
+  }
   const factory=(await import(pathToFileURL(path.resolve(gluePath)).href)).default;
   return createBlinkCore({ wasmBinary, factory, options });
 }

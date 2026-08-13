@@ -62,14 +62,21 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
     return true;
   }
   function inputPending(){ return hasInputDevice ? Module._blinkenlib_input_pending() : 0; }
+  const xRunner=createXRunner(Module, {
+    writeStr, writeArgv, prognamePtr, argcPtr, argvPtr, decode,
+    resetOutput(){ outBytes=[]; errBytes=[]; },
+    getOutBytes(){ return outBytes; }, getErrBytes(){ return errBytes; },
+  });
   return {
     Module, clstruct,
     // Capability flags reflect the portabox max-perf build. `pipe` is the
-    // pipe()/pipe2() SYSCALL (implemented), distinct from `pipelines` (shell
-    // `a | b`) which needs fork() -- absent under emscripten, so false.
-    // `threads` requires crossOriginIsolated (COOP/COEP) at serve time for the
-    // SharedArrayBuffer the pthread pool needs.
-    capabilities:{ tarMount:true, nodefs:!!Module.FS.filesystems?.NODEFS, sockets:true, threads:true, sharedMemory:typeof SharedArrayBuffer!=="undefined", pipe:true, pipelines:false, fork:false, framebuffer:true, jit:false, vectorISA:"sse2" },
+    // pipe()/pipe2() syscall (implemented), distinct from `pipelines` (shell
+    // `a | b`, needs fork() -- absent under emscripten). `threads` reflects
+    // whether pthread_create can actually succeed here and now (needs
+    // crossOriginIsolated + SharedArrayBuffer), not just that the wasm was
+    // compiled -pthread -- a hardcoded `true` would falsely license
+    // startXServer/launchXClient into hanging in a non-isolated browser tab.
+    capabilities:{ tarMount:true, nodefs:!!Module.FS.filesystems?.NODEFS, sockets:true, threads:typeof SharedArrayBuffer!=="undefined", sharedMemory:typeof SharedArrayBuffer!=="undefined", pipe:true, pipelines:false, fork:false, framebuffer:true, jit:false, vectorISA:"sse2" },
     fbInfo, fbView, pushInput, inputPending,
     mountTarBytes(tarBytes, onError){ extractTarToFS(Module.FS, tarBytes, onError) },
     mountNodeDir(hostDir, guestDir="/host"){
@@ -95,13 +102,15 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       const FS=Module.FS;
       return new Promise((res,rej)=>FS.syncfs(false,(e)=>e?rej(e):res()));
     },
-    // Cache the bytes that should sit at /program (blink always execs /program).
-    // Reusing the same handle across runElf skips the per-call multi-MB FS write
-    // (busybox is ~1MB). Returns the opaque handle to pass back as runElf opts.path.
+    // Cache the bytes that should sit at /program (blink always execs /program)
+    // so runElf can skip the per-call multi-MB FS write via the returned handle.
+    // `gen` bumps on every re-preload of the same name so runElf's skip-write
+    // check (keyed on handle+gen) can't serve stale bytes from a prior generation.
     preloadFile(name, bytes){
       const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
       const handle="pre:"+name;
-      preloaded.set(handle, data);
+      const gen=(preloaded.get(handle)?.gen ?? 0)+1;
+      preloaded.set(handle, { data, gen });
       return handle;
     },
     isPreloaded(handle){ return preloaded.has(handle); },
@@ -109,14 +118,15 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       if(exitDeferred) throw new Error("blink-core: previous run not yet settled");
       const FS=Module.FS;
       // Resolve the bytes: explicit bytes, or a preloaded handle.
-      let data=bytes;
+      let data=bytes, gen=null;
       if(!data && path){
-        data=preloaded.get(path);
-        if(!data) throw new Error("blink-core: unknown preload handle "+path);
+        const entry=preloaded.get(path);
+        if(!entry) throw new Error("blink-core: unknown preload handle "+path);
+        data=entry.data; gen=entry.gen;
       }
       if(!data) throw new Error("blink-core: runElf needs bytes or a preload handle");
-      const writeKey=path||null;
-      // Skip the FS write if the identical handle is already sitting at /program.
+      const writeKey=path?path+"#"+gen:null;
+      // Skip the FS write if the identical handle+generation is already sitting at /program.
       if(!(writeKey && lastLoaded===writeKey)){
         const u8=data instanceof Uint8Array?data:new Uint8Array(data);
         try{ FS.unlink("/program") }catch(_){}
@@ -168,12 +178,8 @@ export async function createBlinkCore({ wasmBinary, factory, options={} }){
       const exitCode=await done;
       return { exitCode, stdout:decode(outBytes), stderr:decode(errBytes), signal:lastSignal };
     },
-    // PERSISTENT X run model (live windows) -- see blink-core-x.js.
-    ...createXRunner(Module, {
-      writeStr, writeArgv, prognamePtr, argcPtr, argvPtr, decode,
-      resetOutput(){ outBytes=[]; errBytes=[]; },
-      getOutBytes(){ return outBytes; }, getErrBytes(){ return errBytes; },
-    }),
+    // PERSISTENT X run model (live windows) + dispose() -- see blink-core-x.js.
+    ...xRunner,
     pushStdin(bytes){ for(const b of [...bytes].reverse()) stdinQueue.unshift(b) },
     async runShellScript(busyboxBytes, scriptText, { argv=[], progname="/program" }={}){
       const FS=Module.FS;
