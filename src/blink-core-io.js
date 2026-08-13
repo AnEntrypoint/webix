@@ -8,15 +8,16 @@ const REGS=["rip","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14
 
 const strEncoder=new TextEncoder();
 
-// Bulk Uint8Array.set() instead of a per-byte DataView loop -- also fixes a
-// latent correctness bug: charCodeAt(i) wrote raw UTF-16 code units as bytes,
-// corrupting any non-ASCII path/progname. TextEncoder produces real UTF-8.
+// encodeInto writes directly into the target buffer (no intermediate
+// allocation) and, unlike a raw byte-count slice, never splits a multi-byte
+// UTF-8 sequence when the string overflows max -- it only ever writes whole
+// code points, so a truncated write is still valid UTF-8. This also fixes a
+// latent correctness bug the old per-byte DataView loop had: charCodeAt(i)
+// wrote raw UTF-16 code units as bytes, corrupting any non-ASCII path/progname.
 export function writeStr(Module,ptr,str,max){
   const view=new Uint8Array(memBuffer(Module));
-  const bytes=strEncoder.encode(String(str));
-  const n=Math.min(bytes.length,max-1);
-  view.set(bytes.subarray(0,n),ptr);
-  view[ptr+n]=0;
+  const { written }=strEncoder.encodeInto(String(str), view.subarray(ptr,ptr+max-1));
+  view[ptr+written]=0;
 }
 
 // Write an argv array as a NUL-separated buffer terminated by a double NUL.

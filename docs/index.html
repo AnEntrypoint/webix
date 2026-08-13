@@ -334,7 +334,12 @@
 
     // The live shell, framed as a Linux terminal window — the page centerpiece.
     function terminalHero(){
-      const ready = state.status === 'ready' || state.status === 'running';
+      // blink-core.js's runElf() throws "previous run not yet settled" on any
+      // overlapping call -- the CLI panel and the framebuffer panel share one
+      // host singleton, so gate CLI input/submit on the framebuffer demo's
+      // busy state too (and vice versa, see framebufferPanel's btn below),
+      // not just on the CLI's own internal queue.
+      const ready = (state.status === 'ready' || state.status === 'running') && state.fbStatus !== 'running';
       const statusCls = state.status === 'ready' ? 'ready' : (state.cliBusy || state.status === 'booting' ? 'busy' : 'idle');
       const statusTxt = state.status === 'booting' ? 'booting' : (state.cliBusy ? 'running' : (ready ? 'ready' : state.status));
       const lines = state.term.length ? state.term
@@ -434,7 +439,11 @@
           h('p', { class: 'wb-card-desc', style: 'margin:0 0 10px' },
             'a guest program (fbtest.elf) mmaps an RGBA buffer and registers it via a synthetic syscall; the host reads it back zero-copy through spy_address and blits it to this canvas on a rAF loop — the same path src/display.js and containers/fbtest.elf give any fbdev-writing program.'),
           h('div', { class: 'wb-row', style: 'margin-bottom:8px' },
-            btn('run fbtest.elf', runFramebufferDemo, !ready || state.fbStatus === 'running'),
+            // Also disabled while the CLI panel has a command in flight --
+            // both panels share one host singleton and blink-core.js's
+            // runElf() throws on any overlapping call (see terminalHero's
+            // matching guard the other direction).
+            btn('run fbtest.elf', runFramebufferDemo, !ready || state.fbStatus === 'running' || state.cliBusy),
             h('span', null, 'status:'), h('code', null, state.fbStatus),
             h('span', null, 'geometry:'), h('code', null, geom)
           ),
