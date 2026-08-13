@@ -333,7 +333,12 @@
 
     // The live shell, framed as a Linux terminal window — the page centerpiece.
     function terminalHero(){
-      const ready = state.status === 'ready' || state.status === 'running';
+      // blink-core.js's runElf() throws "previous run not yet settled" on any
+      // overlapping call -- the CLI panel and the framebuffer panel share one
+      // host singleton, so gate CLI input/submit on the framebuffer demo's
+      // busy state too (and vice versa, see framebufferPanel's btn below),
+      // not just on the CLI's own internal queue.
+      const ready = (state.status === 'ready' || state.status === 'running') && state.fbStatus !== 'running';
       const statusCls = state.status === 'ready' ? 'ready' : (state.cliBusy || state.status === 'booting' ? 'busy' : 'idle');
       const statusTxt = state.status === 'booting' ? 'booting' : (state.cliBusy ? 'running' : (ready ? 'ready' : state.status));
       const lines = state.term.length ? state.term
@@ -346,7 +351,7 @@
             'a real busybox shell on a blink wasm cpu - ~150 linux syscalls, real ELF, real apk. no js syscall layer. type into the terminal; it runs in this tab.'),
           h('div', { class: 'wb-chips' },
             h('span', { class: 'wb-chip' }, '22/22 tests'),
-            h('span', { class: 'wb-chip' }, 'node + bun'),
+            h('span', { class: 'wb-chip' }, 'node first-class'),
             h('span', { class: 'wb-chip' }, 'threaded + sockets'),
             h('span', { class: 'wb-chip' }, 'sse2')
           ),
@@ -432,7 +437,11 @@
           h('p', { class: 'wb-card-desc', style: 'margin:0 0 10px' },
             'a guest program (fbtest.elf) mmaps an RGBA buffer and registers it via a synthetic syscall; the host reads it back zero-copy through spy_address and blits it to this canvas on a rAF loop — the same path src/display.js and containers/fbtest.elf give any fbdev-writing program.'),
           h('div', { class: 'wb-row', style: 'margin-bottom:8px' },
-            btn('run fbtest.elf', runFramebufferDemo, !ready || state.fbStatus === 'running'),
+            // Also disabled while the CLI panel has a command in flight --
+            // both panels share one host singleton and blink-core.js's
+            // runElf() throws on any overlapping call (see terminalHero's
+            // matching guard the other direction).
+            btn('run fbtest.elf', runFramebufferDemo, !ready || state.fbStatus === 'running' || state.cliBusy),
             h('span', null, 'status:'), h('code', null, state.fbStatus),
             h('span', null, 'geometry:'), h('code', null, geom)
           ),
@@ -451,7 +460,7 @@
         { name:'blink owns the cpu surface', desc:'~150 linux x86_64 syscalls, signals, the mmu, and instruction decode — all in the upstream blink wasm. no parallel js abi. this portabox build is threaded (pthread) and sockets-enabled; only fork/clone (no emscripten fork) stays out of scope.', meta:'host' },
         { name:'<200 lines per file',        desc:'every module under the cap. if it grows past 200L it splits before merge. forces composition over sprawl.', meta:'invariant' },
         { name:'single orchestration surface', desc:'createBlinkCore.runElf is the only run path. the earlier xstate kernel/machines wrapper over runElf was removed as unused indirection the demo and cli never exercised.', meta:'v0.8.0' },
-        { name:'node + bun first-class',     desc:'bun test.js passes 22/22 alongside node 23.10. file:// dynamic import + emscripten glue + wasm load all work in bun 1.3.8 unmodified.', meta:'parity' },
+        { name:'node first-class, bun partial', desc:'node test.js passes 22/22. bun currently passes 15/22 under this threaded build (a tracked worker_threads regression, see AGENTS.md) -- node is the supported runtime until that closes.', meta:'runtime' },
         { name:'browser witnessed',          desc:'this page boots the same host the test suite uses. window.__debug.x86_64 is the contract — ready, exitCode, registers, stdout, runElf, snapshot.', meta:'live' },
         { name:'threaded + sockets, NOJIT',  desc:'sse2 verified. avx traps SIGILL. threads + AF_INET sockets on. no fork() (emscripten) so full shell pipelines are out; JIT is impossible under wasm32. fork emsdk to lift the rest.', meta:'caveat' }
       ];
